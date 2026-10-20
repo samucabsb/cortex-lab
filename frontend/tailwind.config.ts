@@ -10,32 +10,24 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
-        scifi: {
-          bg: "#020617", // slate-950 deep void
-          surface: "rgba(15, 23, 42, 0.75)", // glass surface
-          border: "rgba(51, 65, 85, 0.5)",
-          cyan: "#22d3ee", // data flow / telemetry
-          emerald: "#34d399", // validated / operational
-          amber: "#f59e0b", // awaiting HITL approval
-          rose: "#f43f5e", // high risk of bias / anomaly
-          violet: "#a855f7", // cognitive synthesis
+        paper: {
+          50: "#FCFBF9",
+          100: "#FAF9F6", // Primary Editorial Ivory Background
+          200: "#F2EFEB",
+          300: "#E5E0D8",
+          400: "#D3CCC1",
+          500: "#B8ADA0",
         },
+      },
+      fontFamily: {
+        sans: ["var(--font-sans)", "Plus Jakarta Sans", "system-ui", "sans-serif"],
+        serif: ["var(--font-serif)", "Newsreader", "Georgia", "serif"],
+        mono: ["var(--font-mono)", "JetBrains Mono", "monospace"],
       },
       boxShadow: {
-        glowCyan: "0 0 20px -2px rgba(34, 211, 238, 0.4)",
-        glowEmerald: "0 0 20px -2px rgba(52, 211, 153, 0.4)",
-        glowAmber: "0 0 20px -2px rgba(245, 158, 11, 0.5)",
-        glowRose: "0 0 20px -2px rgba(244, 63, 94, 0.5)",
-      },
-      animation: {
-        "pulse-slow": "pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite",
-        "conduit-flow": "flow 2s linear infinite",
-      },
-      keyframes: {
-        flow: {
-          "0%": { strokeDashoffset: "24" },
-          "100%": { strokeDashoffset: "0" },
-        },
+        editorial: "0 1px 3px 0 rgba(0, 0, 0, 0.04), 0 1px 2px 0 rgba(0, 0, 0, 0.02)",
+        "editorial-md": "0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03)",
+        "editorial-lg": "0 10px 15px -3px rgba(0, 0, 0, 0.05), 0 4px 6px -2px rgba(0, 0, 0, 0.025)",
       },
     },
   },

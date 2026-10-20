@@ -1,22 +1,74 @@
 import logging
-from typing import Dict, Any
+from typing import Any, Dict, Optional
+from langchain_core.runnables import RunnableConfig
 from app.agents.state import LabGraphState, PicoFramework
 from app.core.llm_provider import MultiProviderLLMManager
 from app.prompts import load_prompt
+from app.services.events import AGENT_COORDINATOR, emit_event
 
 logger = logging.getLogger("cortexlab.agents.coordinator")
 
+PICO_FIELDS = ("population", "intervention", "comparator", "outcome")
 
-async def pi_coordinator_node(state: LabGraphState) -> Dict[str, Any]:
-    """PI Coordinator Agent: Deconstructs research question into PICO and Boolean strategies."""
-    topic = state.get("query") or state.get("topic") or "Biomedical Systematic Review"
-    system_prompt = load_prompt("pi_coordinator")
-    logger.info(f"[PI Coordinator] Formulating protocol for: {topic}")
 
-    llm_manager = MultiProviderLLMManager(
-        byok_gemini=state.get("byok_gemini_key"),
-        byok_groq=state.get("byok_groq_key"),
-    )
+async def pi_coordinator_node(state: LabGraphState, config: Optional[RunnableConfig] = None) -> Dict[str, Any]:
+    """PI Coordinator Agent: registers and validates the protocol defined by the researcher.
+
+    The researcher owns the PICO and the Boolean query. This node never invents either one;
+    it refuses to start a review whose protocol is incomplete.
+    """
+    topic = state.get("query") or state.get("topic") or ""
+    pico = state.get("pico") or {}
+    queries = [q.strip() for q in (state.get("boolean_queries") or []) if q and q.strip()]
+    missing = [f for f in PICO_FIELDS if not str(pico.get(f) or "").strip()]
+    logger.info(f"[PI Coordinator] Registering protocol for: {topic}")
+
+    await emit_event(config, AGENT_COORDINATOR, "node_started", "Coordenador validando o protocolo definido pelo pesquisador",
+                     status="WORKING")
+
+    if missing or not queries:
+        problems = [f"campo PICO ausente: {f}" for f in missing]
+        if not queries:
+            problems.append("nenhuma query booleana informada")
+        await emit_event(config, AGENT_COORDINATOR, "node_failed", "Protocolo incompleto: " + "; ".join(problems),
+                         status="ERROR", problems=problems)
+        return {
+            "errors": problems,
+            "current_step": "ERROR",
+            "hitl_pending": False,
+            "hitl_checkpoint": None,
+            "status_message": "Protocolo incompleto. O pesquisador deve preencher P, I, C, O e a query booleana.",
+        }
+
+    registered: PicoFramework = {f: str(pico[f]).strip() for f in PICO_FIELDS}  # type: ignore[typeddict-item]
+    origin = "sugestão de IA revisada pelo pesquisador" if state.get("ai_assisted") else "definição manual do pesquisador"
+
+    await emit_event(config, AGENT_COORDINATOR, "protocol_registered",
+                     f"Protocolo PICO registrado ({origin}) com {len(queries)} query(ies) booleana(s)",
+                     status="COMPLETED", pico=registered, boolean_queries=queries,
+                     ai_assisted=bool(state.get("ai_assisted")))
+
+    return {
+        "pico": registered,
+        "boolean_queries": queries,
+        "errors": [],
+        "current_step": "MINING",
+        "hitl_pending": False,
+        "hitl_checkpoint": None,
+        "status_message": f"Protocolo registrado ({origin}). Iniciando mineração da literatura.",
+    }
+
+
+async def suggest_protocol(
+    topic: str, byok_gemini: Optional[str] = None, byok_groq: Optional[str] = None
+) -> Optional[Dict[str, Any]]:
+    """Optional 'Sugerir com IA'. Returns None without an LLM key or on an unusable answer.
+
+    Not part of the graph: a suggestion is only a draft the researcher must review and confirm.
+    """
+    llm_manager = MultiProviderLLMManager(byok_gemini=byok_gemini, byok_groq=byok_groq)
+    if not llm_manager.has_active_key:
+        return None
 
     user_prompt = (
         f"Estruture o protocolo de revisão sistemática (PICO, 3 queries booleanas e critérios de elegibilidade) "
@@ -34,64 +86,19 @@ async def pi_coordinator_node(state: LabGraphState) -> Dict[str, Any]:
         '  "exclusion_criteria": ["criterio 1", "criterio 2", "criterio 3"]\n'
         "}"
     )
+    parsed = await llm_manager.invoke_json(prompt=user_prompt, system_message=load_prompt("pi_coordinator"))
+    if not isinstance(parsed, dict) or not isinstance(parsed.get("pico"), dict):
+        return None
 
-    parsed_json = await llm_manager.invoke_json(prompt=user_prompt, system_message=system_prompt)
-
-    if isinstance(parsed_json, dict) and "pico" in parsed_json:
-        raw_pico = parsed_json.get("pico") or {}
-        pico: PicoFramework = {
-            "population": str(raw_pico.get("population", f"População clínica ou experimental em {topic}")),
-            "intervention": str(raw_pico.get("intervention", f"Intervenção ou protocolo avaliado em {topic}")),
-            "comparator": str(raw_pico.get("comparator", "Controle padrão, placebo ou linha de base comparativa")),
-            "outcome": str(raw_pico.get("outcome", "Eficácia quantitativa, segurança e significância estatística")),
-        }
-        boolean_queries = parsed_json.get("boolean_queries") or [topic]
-        inclusion = state.get("inclusion_criteria") or parsed_json.get("inclusion_criteria") or []
-        exclusion = state.get("exclusion_criteria") or parsed_json.get("exclusion_criteria") or []
-    else:
-        # Deterministic scientific protocol fallback when operating without API keys
-        topic_keywords = [w for w in topic.replace(",", " ").split() if len(w) > 3]
-        primary_subject = topic_keywords[0] if topic_keywords else topic
-        intervention_subject = " ".join(topic_keywords[1:3]) if len(topic_keywords) > 1 else topic
-
-        pico = {
-            "population": f"Pacientes, coortes clínicas ou modelos experimentais relacionados a {topic}",
-            "intervention": f"Protocolo terapêutico, tecnológico ou analítico focado em {intervention_subject}",
-            "comparator": "Padrão-ouro clínico, grupo controle ativo, placebo ou baseline comparativo",
-            "outcome": "Desfechos primários de eficácia, segurança metodológica e significância estatística (p < 0.05)",
-        }
-
-        boolean_queries = [
-            f"{topic}",
-            f'("{primary_subject}") AND ("{intervention_subject}") AND (trial OR review OR cohort)',
-            f'("{topic}") AND (randomized OR control OR methodology)',
-        ]
-
-        inclusion = state.get("inclusion_criteria") or [
-            "Artigos originais revisados por pares com DOI verificável",
-            "Metodologia empírica com tamanho amostral (N) e estatística descritos",
-            "Presença de grupo comparador/controle ou benchmark validado",
-            "Publicações entre 2018 e 2026 em acesso aberto ou indexadas",
-        ]
-
-        exclusion = state.get("exclusion_criteria") or [
-            "Editoriais opinativos, cartas ao editor ou resumos sem dados estatísticos",
-            "Estudos sem descrição clara de protocolo metodológico ou sem controle",
-            "Publicações sem identificador DOI válido na Crossref/OpenAlex",
-        ]
-
-    current_statuses = dict(state.get("agent_statuses") or {})
-    current_statuses["coordinator"] = "COMPLETED"
-    current_statuses["miner"] = "WORKING"
+    raw_pico = parsed["pico"]
+    pico = {f: str(raw_pico.get(f) or "").strip() for f in PICO_FIELDS}
+    queries = [str(q).strip() for q in (parsed.get("boolean_queries") or []) if str(q).strip()]
+    if not all(pico.values()) or not queries:
+        return None
 
     return {
         "pico": pico,
-        "boolean_queries": boolean_queries,
-        "inclusion_criteria": inclusion,
-        "exclusion_criteria": exclusion,
-        "active_agent": "coordinator",
-        "current_bench": "bench_coordinator",
-        "agent_statuses": current_statuses,
-        "current_step": "MINING",
-        "status_message": f"PI Coordinator estruturou protocolo PICO e {len(boolean_queries)} queries booleanas para '{topic}'.",
+        "boolean_queries": queries,
+        "inclusion_criteria": [str(c) for c in (parsed.get("inclusion_criteria") or [])],
+        "exclusion_criteria": [str(c) for c in (parsed.get("exclusion_criteria") or [])],
     }

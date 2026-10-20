@@ -1,31 +1,46 @@
 import asyncio
 import logging
-from typing import Dict, Any, List
-import httpx
+from typing import Any, Dict, List, Optional
+from langchain_core.runnables import RunnableConfig
+from langgraph.types import interrupt
 from app.agents.state import LabGraphState
-from app.models.schemas import Paper
-from app.services.open_apis import federated_literature_search, clean_doi, validate_doi_with_crossref
+from app.services.events import AGENT_SEARCHER, AGENT_VALIDATOR, emit_event
+from app.services.open_apis import clean_doi, federated_literature_search, verify_doi_crossref
 from app.prompts import load_prompt
 
 logger = logging.getLogger("cortexlab.agents.miner")
 
+CROSSREF_CONCURRENCY = 6
 
-async def miner_node(state: LabGraphState) -> Dict[str, Any]:
-    """Miner Agent: Performs federated search across OpenAlex, PubMed & Europe PMC with Crossref DOI verification."""
-    topic = state.get("query") or state.get("topic") or "Biomedical Research"
+
+async def miner_node(state: LabGraphState, config: Optional[RunnableConfig] = None) -> Dict[str, Any]:
+    """Miner: federated search (OpenAlex + Europe PMC) then Crossref DOI verification, with live telemetry."""
+    topic = state.get("query") or state.get("topic") or ""
     prompt = load_prompt("miner")
-    logger.info(f"[Miner Agent] Literature mining for: {topic} (prompt size: {len(prompt)})")
+    queries = state.get("boolean_queries") or []
+    search_query = queries[0] if queries else topic
+    logger.info(f"[Miner Agent] Literature mining for: {search_query} (prompt size: {len(prompt)})")
 
-    # Use first boolean query or raw query
-    search_query = state.get("boolean_queries", [topic])[0] if state.get("boolean_queries") else topic
     max_p = state.get("max_papers") or 20
-    limit_per_source = max(4, min(max_p // 2, 12))
-    papers: List[Paper] = await federated_literature_search(search_query, limit_per_source=limit_per_source)
+    limit_per_source = max(4, min(max_p, 25))
 
-    # Deduplicate strictly by DOI
+    async def on_search_event(kind: str, source: str, message: str, **data: Any) -> None:
+        await emit_event(config, AGENT_SEARCHER, kind, message, source=source, **data)
+
+    await emit_event(config, AGENT_SEARCHER, "node_started", "Minerador iniciando busca federada",
+                     status="WORKING", query=search_query)
+
+    papers = await federated_literature_search(
+        search_query,
+        limit_per_source=limit_per_source,
+        year_start=state.get("year_start"),
+        year_end=state.get("year_end"),
+        on_event=on_search_event,
+    )
+
+    # Deduplicate strictly by DOI, then cap at the requested size
     seen_dois = set()
     deduped_papers: List[Dict[str, Any]] = []
-
     for p in papers:
         doi_norm = clean_doi(p.doi) if p.doi else None
         if doi_norm and doi_norm in seen_dois:
@@ -36,58 +51,113 @@ async def miner_node(state: LabGraphState) -> Dict[str, Any]:
         paper_dict = p.model_dump()
         paper_dict["doi"] = doi_norm or paper_dict.get("doi")
         deduped_papers.append(paper_dict)
+    deduped_papers = deduped_papers[:max_p]
 
-    # Cryptographic/official validation of DOIs via Crossref
-    try:
-        async with httpx.AsyncClient() as client:
-            val_tasks = [
-                validate_doi_with_crossref(p["doi"], client=client) if p.get("doi") else asyncio.sleep(0, result=False)
-                for p in deduped_papers
-            ]
-            if val_tasks:
-                results = await asyncio.gather(*val_tasks, return_exceptions=True)
-                for p, is_valid in zip(deduped_papers, results):
-                    p["doi_verified"] = bool(is_valid) if not isinstance(is_valid, Exception) else False
-    except Exception as e:
-        logger.warning(f"[Miner Agent] Crossref verification batch failed: {e}")
+    await emit_event(
+        config, AGENT_SEARCHER, "counters",
+        f"{len(deduped_papers)} artigos únicos após deduplicação",
+        status="COMPLETED",
+        papers_total=len(deduped_papers),
+        with_abstract=sum(1 for p in deduped_papers if p.get("abstract")),
+        without_doi=sum(1 for p in deduped_papers if not p.get("doi")),
+    )
 
-    current_statuses = dict(state.get("agent_statuses") or {})
-    current_statuses["miner"] = "WAITING_APPROVAL"
+    if not deduped_papers:
+        await emit_event(config, AGENT_SEARCHER, "node_finished",
+                         "Nenhum artigo retornado pelas bases. Revise a query booleana.", status="COMPLETED")
+        return {
+            "raw_papers": [],
+            "current_step": "NO_RESULTS",
+            "hitl_pending": False,
+            "hitl_checkpoint": None,
+            "status_message": "Nenhum artigo encontrado. Ajuste a query booleana e inicie uma nova revisão.",
+        }
+
+    # Official verification of DOIs via Crossref (existence AND title match)
+    await emit_event(config, AGENT_VALIDATOR, "node_started", "Validador conferindo DOIs na Crossref",
+                     status="WORKING", papers_total=len(deduped_papers))
+    semaphore = asyncio.Semaphore(CROSSREF_CONCURRENCY)
+    counters = {"checked": 0, "verified": 0}
+
+    async def check(paper: Dict[str, Any]) -> None:
+        doi = paper.get("doi")
+        if not doi:
+            paper["doi_status"], paper["doi_verified"] = "no_doi", False
+            await emit_event(config, AGENT_VALIDATOR, "doi_check",
+                             "Artigo sem DOI nos metadados da fonte", source="Crossref",
+                             paper_id=paper["id"], doi_status="no_doi")
+            return
+        async with semaphore:
+            result = await verify_doi_crossref(doi, expected_title=paper.get("title"))
+        status = result["status"]
+        paper["doi_status"], paper["doi_verified"] = status, status == "verified"
+        counters["checked"] += 1
+        counters["verified"] += int(status == "verified")
+        await emit_event(
+            config, AGENT_VALIDATOR, "doi_check", f"DOI {doi}: {status}", source="Crossref",
+            status=status.upper(), paper_id=paper["id"], doi=doi, doi_status=status,
+            http_status=result.get("http_status"), elapsed_ms=result.get("elapsed_ms"),
+            similarity=result.get("similarity"), crossref_title=result.get("crossref_title"),
+            checked=counters["checked"], verified=counters["verified"], papers_total=len(deduped_papers),
+        )
+
+    await asyncio.gather(*(check(p) for p in deduped_papers))
 
     verified_count = sum(1 for p in deduped_papers if p.get("doi_verified"))
-    status_msg = (
-        f"MinerAgent recuperou e deduplicou {len(deduped_papers)} artigos ({verified_count} com DOI validado na Crossref). "
-        "Aguardando triagem humana."
+    await emit_event(
+        config, AGENT_VALIDATOR, "node_finished",
+        f"{verified_count}/{len(deduped_papers)} DOIs confirmados na Crossref (existência + título)",
+        status="COMPLETED", verified=verified_count, papers_total=len(deduped_papers),
     )
 
     return {
         "raw_papers": deduped_papers,
-        "active_agent": "miner",
-        "current_bench": "bench_mining",
-        "agent_statuses": current_statuses,
         "current_step": "SCREENING_CHECKPOINT",
         "hitl_pending": True,
         "hitl_checkpoint": "screening",
-        "status_message": status_msg,
+        "status_message": (
+            f"{len(deduped_papers)} artigos recuperados ({verified_count} com DOI confirmado na Crossref). "
+            "Aguardando a triagem do pesquisador."
+        ),
     }
 
 
 def human_screening_node(state: LabGraphState) -> Dict[str, Any]:
-    """HITL Screening Gate: Researcher accepts or excludes mined papers."""
-    logger.info("[HITL Gate] Processing human screening decisions.")
-    screened = [p for p in state.get("raw_papers", []) if p.get("is_screened_in", True)]
+    """HITL Screening Gate: the graph pauses here (persisted checkpoint) until the researcher decides.
 
-    current_statuses = dict(state.get("agent_statuses") or {})
-    current_statuses["miner"] = "COMPLETED"
-    current_statuses["methodologist"] = "WORKING"
+    On resume LangGraph re-runs this node from the top, so it only reads the decision and applies it.
+    """
+    raw_papers = state.get("raw_papers", [])
+    decision = interrupt({
+        "checkpoint": "screening",
+        "message": "Triagem humana: inclua ou exclua cada artigo (exclusão exige justificativa).",
+        "paper_ids": [p["id"] for p in raw_papers],
+    })
+
+    decided = {d["paper_id"]: d for d in (decision or {}).get("decisions", [])}
+    screened: List[Dict[str, Any]] = []
+    log: List[Dict[str, Any]] = []
+    for paper in raw_papers:
+        entry = decided.get(paper["id"])
+        verdict = entry["decision"] if entry else "undecided"
+        log.append({
+            "paper_id": paper["id"],
+            "doi": paper.get("doi"),
+            "decision": verdict,
+            "reason": (entry or {}).get("reason"),
+            "decided_by": "human",
+        })
+        if verdict == "include":
+            screened.append(paper)
 
     return {
         "screened_papers": screened,
-        "active_agent": "methodologist",
-        "current_bench": "bench_auditing",
-        "agent_statuses": current_statuses,
+        "screening_log": log,
         "hitl_pending": False,
         "hitl_checkpoint": None,
-        "current_step": "AUDITING",
-        "status_message": f"Triagem humana aprovada com {len(screened)} artigos incluídos para auditoria metodológica.",
+        "current_step": "AUDITING" if screened else "NO_INCLUDED_STUDIES",
+        "status_message": (
+            f"Triagem humana concluída: {len(screened)} incluídos, {len(raw_papers) - len(screened)} excluídos."
+            if screened else "Nenhum artigo incluído na triagem. Revisão encerrada."
+        ),
     }

@@ -26,6 +26,9 @@ class Settings(BaseSettings):
     GROQ_API_KEY: str = os.getenv("GROQ_API_KEY", "")
     GROQ_MODEL: str = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
 
+    # Local SQLite: LangGraph checkpoints (HITL pauses) + auditable agent event log
+    DB_PATH: str = os.getenv("DB_PATH", "cortexlab.db")
+
     # Supabase (Free Tier)
     SUPABASE_URL: str = os.getenv("SUPABASE_URL", "")
     SUPABASE_KEY: str = os.getenv("SUPABASE_KEY", "")

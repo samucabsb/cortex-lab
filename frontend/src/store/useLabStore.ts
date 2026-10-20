@@ -1,105 +1,30 @@
 import { create } from 'zustand';
-import {
-  AgentBenchId,
-  AgentStateStatus,
-  PaperItem,
-  PrismaMatrixItem,
-  KnowledgeGapItem,
-  ReviewSession,
-} from '@/types';
-
-export interface AgentVisualInfo {
-  id: string;
-  benchId: AgentBenchId;
-  name: string;
-  role: string;
-  status: AgentStateStatus;
-  currentTask: string;
-  progress: number;
-}
+import { ReviewSnapshot } from '@/types';
 
 export interface ByokSettings {
   geminiApiKey: string;
   groqApiKey: string;
-  preferredProvider: 'gemini' | 'groq' | 'backend';
+  preferredProvider?: 'gemini' | 'groq' | 'backend';
 }
 
-interface LabState {
-  // Session Identifiers & Context
+interface LabStoreState {
+  // Active Review State
   reviewId: string | null;
-  topic: string;
-  currentStep: string;
-  statusMessage: string;
-  activeBench: AgentBenchId;
-
-  // Agent Multi-Bench Telemetry
-  agents: Record<string, AgentVisualInfo>;
-
-  // Scientific Paper Flow
-  rawPapers: PaperItem[];
-  screenedPapers: PaperItem[];
-  auditedPapers: any[];
-  prismaMatrix: PrismaMatrixItem[];
-  knowledgeGaps: KnowledgeGapItem[];
-
-  // Human-in-the-Loop (HITL) Gate
-  hitlPending: boolean;
-  hitlCheckpoint: 'screening' | 'bias_arbitration' | null;
-  hitlModalOpen: boolean;
+  snapshot: ReviewSnapshot | null;
+  wizardStep: 1 | 2 | 3 | 4;
 
   // BYOK Settings (Bring Your Own Key)
   byok: ByokSettings;
   byokModalOpen: boolean;
 
   // Actions
-  setReviewSession: (session: Partial<ReviewSession>) => void;
-  updateAgentStatus: (agentId: string, status: AgentStateStatus, message?: string, progress?: number) => void;
-  setActiveBench: (bench: AgentBenchId) => void;
-  setHitlModalOpen: (open: boolean) => void;
+  setReviewId: (id: string | null) => void;
+  setSnapshot: (snapshot: ReviewSnapshot | null) => void;
+  setWizardStep: (step: 1 | 2 | 3 | 4) => void;
   setByokModalOpen: (open: boolean) => void;
   saveByokSettings: (settings: Partial<ByokSettings>) => void;
-  resolveHitl: (rejectedIds?: string[]) => void;
-  resetLab: () => void;
+  resetAll: () => void;
 }
-
-const DEFAULT_AGENTS: Record<string, AgentVisualInfo> = {
-  coordinator: {
-    id: 'coordinator',
-    benchId: 'mining',
-    name: 'Dr. Turing (PI)',
-    role: 'Investigador Principal',
-    status: 'IDLE',
-    currentTask: 'Aguardando formulação do problema de pesquisa',
-    progress: 0,
-  },
-  miner: {
-    id: 'miner',
-    benchId: 'mining',
-    name: 'Miner Agent',
-    role: 'Mineração Federada & DOI',
-    status: 'IDLE',
-    currentTask: 'Pronto para busca federada em bases abertas',
-    progress: 0,
-  },
-  methodologist: {
-    id: 'methodologist',
-    benchId: 'auditing',
-    name: 'Auditor Agent',
-    role: 'Auditoria de Viés & Métodos',
-    status: 'IDLE',
-    currentTask: 'Aguardando artigos selecionados para auditoria',
-    progress: 0,
-  },
-  synthesizer: {
-    id: 'synthesizer',
-    benchId: 'synthesis',
-    name: 'Synthesizer Agent',
-    role: 'Matriz PRISMA & Gaps',
-    status: 'IDLE',
-    currentTask: 'Aguardando validações metodológicas',
-    progress: 0,
-  },
-};
 
 const getInitialByokSettings = (): ByokSettings => {
   if (typeof window !== 'undefined') {
@@ -115,72 +40,20 @@ const getInitialByokSettings = (): ByokSettings => {
   return {
     geminiApiKey: '',
     groqApiKey: '',
-    preferredProvider: 'backend',
   };
 };
 
-export const useLabStore = create<LabState>((set, get) => ({
+export const useLabStore = create<LabStoreState>((set) => ({
   reviewId: null,
-  topic: '',
-  currentStep: 'IDLE',
-  statusMessage: 'Laboratório autônomo pronto. Inicie uma nova revisão ou configure suas chaves BYOK.',
-  activeBench: 'mining',
-
-  agents: DEFAULT_AGENTS,
-
-  rawPapers: [],
-  screenedPapers: [],
-  auditedPapers: [],
-  prismaMatrix: [],
-  knowledgeGaps: [],
-
-  hitlPending: false,
-  hitlCheckpoint: null,
-  hitlModalOpen: false,
+  snapshot: null,
+  wizardStep: 1,
 
   byok: getInitialByokSettings(),
   byokModalOpen: false,
 
-  setReviewSession: (session) => {
-    set((state) => ({
-      reviewId: session.review_id ?? state.reviewId,
-      topic: session.query ?? state.topic,
-      currentStep: session.current_step ?? state.currentStep,
-      statusMessage: session.status_message ?? state.statusMessage,
-      rawPapers: session.raw_papers ?? state.rawPapers,
-      screenedPapers: session.screened_papers ?? state.screenedPapers,
-      auditedPapers: session.audited_papers ?? state.auditedPapers,
-      prismaMatrix: session.prisma_matrix ?? state.prismaMatrix,
-      knowledgeGaps: session.knowledge_gaps ?? state.knowledgeGaps,
-      hitlPending: session.hitl_pending ?? state.hitlPending,
-      hitlCheckpoint: session.hitl_checkpoint !== undefined ? session.hitl_checkpoint : state.hitlCheckpoint,
-      hitlModalOpen: session.hitl_pending ? true : state.hitlModalOpen,
-    }));
-  },
-
-  updateAgentStatus: (agentId, status, message, progress) => {
-    set((state) => {
-      const agent = state.agents[agentId];
-      if (!agent) return state;
-
-      return {
-        agents: {
-          ...state.agents,
-          [agentId]: {
-            ...agent,
-            status,
-            currentTask: message ?? agent.currentTask,
-            progress: progress !== undefined ? progress : agent.progress,
-          },
-        },
-      };
-    });
-  },
-
-  setActiveBench: (bench) => set({ activeBench: bench }),
-
-  setHitlModalOpen: (open) => set({ hitlModalOpen: open }),
-
+  setReviewId: (id) => set({ reviewId: id }),
+  setSnapshot: (snapshot) => set({ snapshot }),
+  setWizardStep: (step) => set({ wizardStep: step }),
   setByokModalOpen: (open) => set({ byokModalOpen: open }),
 
   saveByokSettings: (newSettings) => {
@@ -193,36 +66,11 @@ export const useLabStore = create<LabState>((set, get) => ({
     });
   },
 
-  resolveHitl: (rejectedIds = []) => {
-    set((state) => {
-      const updatedRaw = state.rawPapers.map((p) =>
-        rejectedIds.includes(p.id) ? { ...p, is_screened_in: false } : p
-      );
-      return {
-        rawPapers: updatedRaw,
-        hitlPending: false,
-        hitlCheckpoint: null,
-        hitlModalOpen: false,
-      };
-    });
-  },
-
-  resetLab: () => {
+  resetAll: () => {
     set({
       reviewId: null,
-      topic: '',
-      currentStep: 'IDLE',
-      statusMessage: 'Laboratório reiniciado. Pronto para nova pesquisa.',
-      activeBench: 'mining',
-      agents: DEFAULT_AGENTS,
-      rawPapers: [],
-      screenedPapers: [],
-      auditedPapers: [],
-      prismaMatrix: [],
-      knowledgeGaps: [],
-      hitlPending: false,
-      hitlCheckpoint: null,
-      hitlModalOpen: false,
+      snapshot: null,
+      wizardStep: 1,
     });
   },
 }));

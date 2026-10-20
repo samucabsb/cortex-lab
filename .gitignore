@@ -69,3 +69,8 @@ Desktop.ini
 .vscode/
 *.sublime-project
 *.sublime-workspace
+
+# Local SQLite checkpoints + agent event log
+*.db
+*.db-shm
+*.db-wal

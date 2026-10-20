@@ -1,144 +1,196 @@
+import json
 import logging
-from typing import Dict, Any, List
+import re
+from typing import Any, Dict, List, Optional
+from langchain_core.runnables import RunnableConfig
 from app.agents.state import LabGraphState
+from app.core.key_vault import get_keys
 from app.core.llm_provider import MultiProviderLLMManager
-from app.models.schemas import RiskOfBiasLevel
+from app.models.evidence import NEEDS_REVIEW, NOT_FOUND, quote_in_text
 from app.prompts import load_prompt
+from app.services.events import AGENT_SYNTHESIZER, emit_event, thread_id_from_config
 
 logger = logging.getLogger("cortexlab.agents.synthesizer")
 
 
-async def synthesizer_node(state: LabGraphState) -> Dict[str, Any]:
-    """Synthesizer Agent: Consolidates PRISMA Systematic Review Matrix and discovers Knowledge Gaps."""
-    topic = state.get("query") or state.get("topic") or "Pesquisa Científica"
+def _citation_key(authors: List[str], year: Optional[int], source_api: Optional[str], used: set) -> str:
+    """Unique BibTeX-safe key. Without authors we use 'Anon', never a fabricated author name.
+
+    Europe PMC lists 'Surname AB'; OpenAlex lists 'Given Surname'.
+    """
+    surname = "Anon"
+    if authors:
+        tokens = authors[0].replace(",", " ").split()
+        if tokens:
+            pick = tokens[0] if (source_api == "Europe PMC" or "," in authors[0]) else tokens[-1]
+            surname = re.sub(r"[^A-Za-z]", "", pick) or "Anon"
+    base = f"{surname}{year or 'nd'}"
+    key, suffix = base, ord("a")
+    while key in used:
+        key = f"{base}{chr(suffix)}"
+        suffix += 1
+    used.add(key)
+    return key
+
+
+def _cell(evidence: Dict[str, Any]) -> str:
+    """Flat string for CSV/table cells: the grounded value, or the explicit marker."""
+    return evidence["value"]
+
+
+
+def _outcomes_cell(item: Dict[str, Any]) -> str:
+    if item["outcome"]["status"] == "found":
+        return item["outcome"]["value"]
+    if item["p_values"]:
+        return "p-valores no abstract: " + "; ".join(p["value"] for p in item["p_values"])
+    return NEEDS_REVIEW
+
+
+def _first_quote(item: Dict[str, Any]) -> str:
+    candidates = [item["sample_size"], item["outcome"], *item["p_values"], item["comparator"]]
+    for ev in candidates:
+        if ev.get("quote"):
+            return ev["quote"]
+    return NOT_FOUND
+
+
+async def _grounded_gaps(
+    matrix_rows: List[Dict[str, Any]],
+    abstracts_by_id: Dict[str, str],
+    topic: str,
+    llm_manager: MultiProviderLLMManager,
+    system_prompt: str,
+    config: Optional[RunnableConfig],
+) -> List[Dict[str, Any]]:
+    corpus = [
+        {"paper_id": r["paper_id"], "doi": r["doi"], "title": r["title"],
+         "abstract": abstracts_by_id.get(r["paper_id"], "")[:1500]}
+        for r in matrix_rows if abstracts_by_id.get(r["paper_id"])
+    ]
+    if len(corpus) < 2:
+        return []
+
+    prompt = (
+        f"Com base SOMENTE nos abstracts abaixo (tema: '{topic}'), identifique até 3 lacunas de conhecimento.\n"
+        "REGRAS: cada lacuna deve citar ao menos um trecho LITERAL (campo 'quote') de um dos abstracts, com o "
+        "'paper_id' correspondente. Lacunas sem citação literal serão descartadas.\n"
+        f"Abstracts: {json.dumps(corpus, ensure_ascii=False)}\n\n"
+        "Retorne EXCLUSIVAMENTE um array JSON; cada elemento:\n"
+        '{"title": "...", "domain": "...", "description": "...", "unanswered_question": "...", '
+        '"suggested_hypothesis": "...", "supporting": [{"paper_id": "...", "quote": "..."}]}'
+    )
+    await emit_event(config, AGENT_SYNTHESIZER, "llm_call_started",
+                     "Procurando Knowledge Gaps ancorados em citações", source="LLM", papers=len(corpus))
+    result = await llm_manager.invoke_json(prompt=prompt, system_message=system_prompt)
+    if not isinstance(result, list):
+        await emit_event(config, AGENT_SYNTHESIZER, "llm_call_failed",
+                         "IA não retornou JSON utilizável; nenhum Knowledge Gap gerado", source="LLM")
+        return []
+
+    doi_by_id = {r["paper_id"]: r["doi"] for r in matrix_rows}
+    gaps: List[Dict[str, Any]] = []
+    for raw in result:
+        if not isinstance(raw, dict) or not raw.get("title"):
+            continue
+        supporting = []
+        for sup in raw.get("supporting") or []:
+            pid = str(sup.get("paper_id")) if isinstance(sup, dict) else ""
+            quote = str(sup.get("quote") or "") if isinstance(sup, dict) else ""
+            if pid in abstracts_by_id and quote_in_text(quote, abstracts_by_id[pid]):
+                supporting.append({"paper_id": pid, "doi": doi_by_id.get(pid), "quote": quote})
+        if not supporting:
+            continue  # ungrounded claim: dropped
+        gaps.append({
+            "gap_id": f"GAP-{len(gaps) + 1:03d}",
+            "title": str(raw["title"]),
+            "domain": str(raw.get("domain") or NEEDS_REVIEW),
+            "description": str(raw.get("description") or ""),
+            "unanswered_question": str(raw.get("unanswered_question") or ""),
+            "suggested_hypothesis": str(raw.get("suggested_hypothesis") or ""),
+            "supporting": supporting,
+            "supporting_dois": [s["doi"] for s in supporting if s["doi"]],
+            "origin": "llm_with_verified_quotes",
+        })
+    await emit_event(config, AGENT_SYNTHESIZER, "llm_call_finished",
+                     f"{len(gaps)} Knowledge Gap(s) com citação verificada ({len(result) - len(gaps)} descartado(s))",
+                     source="LLM", accepted=len(gaps), discarded=len(result) - len(gaps))
+    return gaps
+
+
+async def synthesizer_node(state: LabGraphState, config: Optional[RunnableConfig] = None) -> Dict[str, Any]:
+    """Synthesizer: PRISMA matrix with per-cell provenance; Knowledge Gaps only when grounded in quotes."""
+    topic = state.get("query") or state.get("topic") or ""
     system_prompt = load_prompt("synthesizer")
     logger.info(f"[Synthesizer Agent] Generating PRISMA 2020 matrix for: {topic}")
 
-    llm_manager = MultiProviderLLMManager(
-        byok_gemini=state.get("byok_gemini_key"),
-        byok_groq=state.get("byok_groq_key"),
-    )
-
     audited = state.get("audited_papers", [])
-    pico = state.get("pico") or {}
-    default_intervention = pico.get("intervention") or f"Protocolo investigado para '{topic}'"
+    await emit_event(config, AGENT_SYNTHESIZER, "node_started",
+                     f"Consolidando a matriz PRISMA de {len(audited)} estudos",
+                     status="WORKING", papers_total=len(audited))
+
+    used_keys: set = set()
     matrix_rows: List[Dict[str, Any]] = []
-
     for item in audited:
-        first_author = item["authors"][0] if item.get("authors") else "Author"
-        first_word = first_author.split()[-1].replace(",", "") if first_author else "Author"
-        year = item.get("year")
-        year_str = str(year) if year else ""
-        cite_key = f"{first_word}{year_str or 'Study'}"
-        p_vals = item.get("p_values") or []
-        p_val_str = f"Significância ({p_vals[0]})" if p_vals else "p-valor não reportado"
-
-        doi_val = item.get("doi") or ""
-        row_dict = {
-            "paper_id": item.get("paper_id", f"paper_{cite_key}"),
-            "doi": doi_val,
-            "citation_key": cite_key,
-            "title": item.get("title", "Estudo Científico"),
-            "authors": item.get("authors", [first_author]),
-            "year": year or 2024,
-            "journal": item.get("journal", "Periódico não informado"),
-            "qualis_capes": item.get("qualis_capes") or "N/A",
-            "sjr_quartile": item.get("sjr_quartile") or "N/A",
-            "population_n": item.get("sample_size", "Não reportado"),
-            "intervention": default_intervention,
-            "comparator": item.get("control_group", "Não detalhado no resumo"),
-            "outcomes": f"{p_val_str} — {item.get('bias_notes', 'Desfecho primário avaliado')[:90]}",
-            "risk_of_bias": item.get("risk_of_bias", RiskOfBiasLevel.LOW.value),
-            "statistical_soundness": "AUDITADO (VIA ABSTRACT)" if item.get("sample_size") else "PENDENTE",
-            "traceable_quote": item.get("sample_quote", "Trecho metodológico não disponível."),
-            "page_reference": item.get("page_reference"),
+        evidence = {
+            "population_n": item["sample_size"],
+            "intervention": item["intervention"],
+            "comparator": item["comparator"],
+            "outcomes": item["outcome"],
+            "p_values": item["p_values"],
+            "design_cues": item["design_cues"],
+            "risk_of_bias": {
+                "value": item["risk_of_bias"],
+                "assessed_by": item["risk_assessed_by"],
+                "justification": item["risk_justification"],
+                "rob2_domains": item["rob2_domains"],
+                "note": "Avaliação RoB 2 completa exige o texto integral; só há julgamento quando feito pelo pesquisador.",
+            },
         }
-        matrix_rows.append(row_dict)
-
-    supporting_dois = [r["doi"] for r in matrix_rows if r.get("doi")]
-
-    # Structured Knowledge Gaps derived from included studies or literature frontier
-    gaps: List[Dict[str, Any]] = []
-    if matrix_rows:
-        gaps = [
-            {
-                "gap_id": "GAP-001",
-                "title": f"Sustentabilidade longitudinal e desfechos tardios em '{topic}'",
-                "domain": "Metodologia & Seguimento Longitudinal",
-                "description": (
-                    "A maioria dos estudos incluídos concentra a avaliação em janelas de curto a médio prazo, "
-                    "sem acompanhamento prolongado (> 12 a 24 meses) para mensurar estabilidade do efeito."
-                ),
-                "unanswered_question": f"Qual é a durabilidade do efeito e segurança em longo prazo de intervenções em '{topic}'?",
-                "supporting_dois": supporting_dois[:3],
-                "suggested_hypothesis": (
-                    "Coortes prospectivas multicêntricas com seguimento de 24 meses demonstrarão necessidade de manutenção de protocolo."
-                ),
-            },
-            {
-                "gap_id": "GAP-002",
-                "title": "Padronização de grupos comparadores e reprodutibilidade inter-laboratorial",
-                "domain": "Padronização Metodológica & Validade Externa",
-                "description": (
-                    "Observa-se heterogeneidade nos critérios de controle e tamanho amostral entre centros de pesquisa, "
-                    "dificultando meta-análise quantitativa direta sem estratificação prévia."
-                ),
-                "unanswered_question": (
-                    f"Como a padronização de parâmetros de controle e estratificação demográfica impacta a eficácia em '{topic}'?"
-                ),
-                "supporting_dois": supporting_dois[-2:] if len(supporting_dois) >= 2 else supporting_dois,
-                "suggested_hypothesis": (
-                    "A adoção de protocolo com comparador ativo padronizado reduzirá a variância inter-estudo."
-                ),
-            },
-        ]
-
-    # If LLM key is configured, synthesize tailored Knowledge Gaps from the actual corpus titles
-    if llm_manager.has_active_key and matrix_rows:
-        titles_summary = [f"{r['citation_key']}: {r['title']} (RoB: {r['risk_of_bias']})" for r in matrix_rows[:8]]
-        gap_prompt = (
-            f"Com base nos seguintes estudos revisados sobre '{topic}':\n{titles_summary}\n\n"
-            "Identifique 2 Lacunas de Conhecimento Científico (Knowledge Gaps) reais e formule hipóteses testáveis.\n"
-            "Retorne EXCLUSIVAMENTE um array JSON com 2 objetos seguindo exatamente estas chaves:\n"
-            "[\n"
-            "  {\n"
-            '    "gap_id": "GAP-001",\n'
-            '    "title": "...",\n'
-            '    "domain": "...",\n'
-            '    "description": "...",\n'
-            '    "unanswered_question": "...",\n'
-            '    "suggested_hypothesis": "..."\n'
-            "  }\n"
-            "]"
+        grounded = sum(
+            1 for key in ("sample_size", "intervention", "comparator", "outcome") if item[key]["status"] == "found"
         )
-        llm_gaps = await llm_manager.invoke_json(prompt=gap_prompt, system_message=system_prompt)
-        if isinstance(llm_gaps, list) and len(llm_gaps) > 0:
-            parsed_gaps: List[Dict[str, Any]] = []
-            for idx, g in enumerate(llm_gaps[:3]):
-                if isinstance(g, dict) and g.get("title"):
-                    parsed_gaps.append({
-                        "gap_id": str(g.get("gap_id") or f"GAP-00{idx + 1}"),
-                        "title": str(g.get("title")),
-                        "domain": str(g.get("domain") or "Fronteira Metodológica"),
-                        "description": str(g.get("description") or ""),
-                        "unanswered_question": str(g.get("unanswered_question") or ""),
-                        "supporting_dois": supporting_dois,
-                        "suggested_hypothesis": str(g.get("suggested_hypothesis") or ""),
-                    })
-            if parsed_gaps:
-                gaps = parsed_gaps
+        matrix_rows.append({
+            "paper_id": item["paper_id"],
+            "doi": item["doi"] or "",
+            "doi_status": item["doi_status"],
+            "citation_key": _citation_key(item["authors"], item["year"], item.get("source_api"), used_keys),
+            "title": item["title"],
+            "authors": item["authors"],
+            "year": item["year"],
+            "journal": item["journal"],
+            "qualis_capes": NOT_FOUND,  # no real Qualis source integrated; never derived from citations
+            "sjr_quartile": NOT_FOUND,
+            "population_n": _cell(item["sample_size"]),
+            "intervention": _cell(item["intervention"]),
+            "comparator": _cell(item["comparator"]),
+            "outcomes": _outcomes_cell(item),
+            "risk_of_bias": item["risk_of_bias"],
+            "statistical_soundness": f"{grounded}/4 campos ancorados no abstract",
+            "traceable_quote": _first_quote(item),
+            "page_reference": None,
+            "evidence": evidence,
+        })
 
-    current_statuses = dict(state.get("agent_statuses") or {})
-    current_statuses["synthesizer"] = "COMPLETED"
+    gaps: List[Dict[str, Any]] = []
+    gemini_key, groq_key = get_keys(thread_id_from_config(config))
+    llm_manager = MultiProviderLLMManager(byok_gemini=gemini_key, byok_groq=groq_key)
+    if matrix_rows and llm_manager.has_active_key:
+        abstracts = {p["id"]: (p.get("abstract") or "") for p in state.get("screened_papers", [])}
+        gaps = await _grounded_gaps(matrix_rows, abstracts, topic, llm_manager, system_prompt, config)
+    elif matrix_rows:
+        await emit_event(config, AGENT_SYNTHESIZER, "info",
+                         "Sem chave de IA: Knowledge Gaps não gerados (exigem IA e citações verificáveis)")
 
-    status_msg = f"Matriz PRISMA ({len(matrix_rows)} estudos) e {len(gaps)} Knowledge Gaps consolidados com sucesso."
+    summary = f"Matriz PRISMA ({len(matrix_rows)} estudos) e {len(gaps)} Knowledge Gap(s) com citação verificada."
+    await emit_event(config, AGENT_SYNTHESIZER, "node_finished", summary, status="COMPLETED",
+                     matrix_rows=len(matrix_rows), knowledge_gaps=len(gaps))
 
     return {
         "prisma_matrix": matrix_rows,
         "knowledge_gaps": gaps,
-        "active_agent": "synthesizer",
-        "current_bench": "bench_synthesis",
-        "agent_statuses": current_statuses,
         "current_step": "COMPLETED",
-        "status_message": status_msg,
+        "hitl_pending": False,
+        "hitl_checkpoint": None,
+        "status_message": summary,
     }

@@ -1,22 +1,6 @@
 from enum import Enum
-from typing import Dict, List, Optional, Any
-from pydantic import BaseModel, Field
-
-
-class AgentBenchType(str, Enum):
-    MINING = "mining"
-    PARSING = "parsing"
-    AUDITING = "auditing"
-    SYNTHESIS = "synthesis"
-    HITL_STATION = "hitl_station"
-
-
-class AgentStatus(str, Enum):
-    IDLE = "IDLE"
-    WORKING = "WORKING"
-    WAITING_APPROVAL = "WAITING_APPROVAL"
-    COMPLETED = "COMPLETED"
-    ERROR = "ERROR"
+from typing import Any, Dict, List, Literal, Optional
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 class RiskOfBiasLevel(str, Enum):
@@ -37,6 +21,10 @@ class Paper(BaseModel):
     source_api: str = Field(..., description="OpenAlex, EuropePMC, SemanticScholar, arXiv")
     open_access_pdf_url: Optional[str] = None
     doi_verified: bool = False
+    doi_status: str = Field(
+        default="unchecked",
+        description="unchecked | verified | title_mismatch | not_found | unreachable | invalid | no_doi",
+    )
     citation_count: int = 0
     is_screened_in: bool = True
     exclusion_reason: Optional[str] = None
@@ -75,19 +63,20 @@ class PrismaMatrixRow(BaseModel):
     doi: Optional[str] = None
     citation_key: str
     title: str
-    authors: List[str]
+    authors: List[str] = Field(default_factory=list)
     year: Optional[int] = None
     journal: Optional[str] = None
-    qualis_capes: Optional[str] = "N/A"
-    sjr_quartile: Optional[str] = "N/A"
-    population_n: Optional[str] = None
-    intervention: Optional[str] = None
-    comparator: Optional[str] = None
-    outcomes: Optional[str] = None
-    risk_of_bias: RiskOfBiasLevel = RiskOfBiasLevel.LOW
-    statistical_soundness: str = "AUDITED"
-    traceable_quote: str
+    qualis_capes: str = "not_found"
+    sjr_quartile: str = "not_found"
+    population_n: str = "not_found"
+    intervention: str = "needs_human_review"
+    comparator: str = "not_found"
+    outcomes: str = "needs_human_review"
+    risk_of_bias: str = "needs_human_review"
+    statistical_soundness: str = "needs_human_review"
+    traceable_quote: str = "not_found"
     page_reference: Optional[int] = None
+    evidence: Dict[str, Any] = Field(default_factory=dict)
 
 
 class KnowledgeGap(BaseModel):
@@ -100,36 +89,74 @@ class KnowledgeGap(BaseModel):
     suggested_hypothesis: str
 
 
-class CreateReviewRequest(BaseModel):
-    topic: str
-    inclusion_criteria: List[str] = Field(default_factory=list)
-    exclusion_criteria: List[str] = Field(default_factory=list)
-    max_papers: int = 20
-    year_start: Optional[int] = 2018
-    year_end: Optional[int] = 2026
-    require_open_access: bool = True
+class PicoInput(BaseModel):
+    population: str
+    intervention: str
+    comparator: str
+    outcome: str
+
+    @field_validator("population", "intervention", "comparator", "outcome")
+    @classmethod
+    def _not_blank(cls, value: str) -> str:
+        value = (value or "").strip()
+        if len(value) < 3:
+            raise ValueError("campo PICO obrigatório (preenchido pelo pesquisador)")
+        return value
+
+
+class ProtocolSuggestionRequest(BaseModel):
+    topic: str = Field(..., min_length=5)
     byok_gemini_key: Optional[str] = None
     byok_groq_key: Optional[str] = None
 
 
+class CreateReviewRequest(BaseModel):
+    """The researcher defines the protocol. The system never invents a PICO."""
+
+    topic: str = Field(..., min_length=5, description="Pergunta de pesquisa")
+    pico: PicoInput
+    boolean_queries: List[str] = Field(..., min_length=1)
+    ai_assisted: bool = Field(default=False, description="PICO/query partiram de uma sugestão de IA revisada")
+    inclusion_criteria: List[str] = Field(default_factory=list)
+    exclusion_criteria: List[str] = Field(default_factory=list)
+    max_papers: int = Field(default=20, ge=1, le=50)
+    year_start: Optional[int] = 2018
+    year_end: Optional[int] = 2026
+    byok_gemini_key: Optional[str] = None
+    byok_groq_key: Optional[str] = None
+
+    @field_validator("boolean_queries")
+    @classmethod
+    def _clean_queries(cls, queries: List[str]) -> List[str]:
+        cleaned = [q.strip() for q in queries if q and q.strip()]
+        if not cleaned:
+            raise ValueError("ao menos uma query booleana é obrigatória")
+        return cleaned
+
+
+class ScreeningDecision(BaseModel):
+    paper_id: str
+    decision: Literal["include", "exclude"]
+    reason: Optional[str] = None
+
+    @model_validator(mode="after")
+    def _exclusion_needs_reason(self) -> "ScreeningDecision":
+        if self.decision == "exclude" and len((self.reason or "").strip()) < 3:
+            raise ValueError(f"exclusão de '{self.paper_id}' exige justificativa")
+        return self
+
+
+class BiasDecision(BaseModel):
+    paper_id: str
+    risk_of_bias: Literal["LOW", "SOME_CONCERNS", "HIGH"]
+    justification: str = Field(..., min_length=3)
+
+
 class HITLDecisionRequest(BaseModel):
-    review_id: str
-    step_checkpoint: str  # "screening" or "bias_arbitration"
-    action: str  # "APPROVE", "REJECT", "OVERRIDE"
-    approved_paper_ids: Optional[List[str]] = None
-    rejected_paper_ids: Optional[List[str]] = None
+    step_checkpoint: Literal["screening", "bias_arbitration"]
+    screening: Optional[List[ScreeningDecision]] = None
+    bias: Optional[List[BiasDecision]] = None
     notes: Optional[str] = None
-
-
-class AgentTelemetryEvent(BaseModel):
-    timestamp: str
-    bench: AgentBenchType
-    agent_name: str
-    status: AgentStatus
-    current_action: str
-    progress_percentage: int
-    papers_processed: int
-    papers_total: int
-    active_conduit_target: Optional[AgentBenchType] = None
-    message: str
-    data_payload: Optional[Dict[str, Any]] = None
+    # BYOK keys live only in memory; re-send them to resume after a server restart.
+    byok_gemini_key: Optional[str] = None
+    byok_groq_key: Optional[str] = None

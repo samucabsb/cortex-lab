@@ -1,12 +1,4 @@
-from typing import Dict, List, Any, Optional, TypedDict
-
-
-class AgentVisualState(TypedDict, total=False):
-    agent_id: str
-    bench_id: str
-    status: str  # 'IDLE' | 'WORKING' | 'WAITING_APPROVAL' | 'COMPLETED' | 'ERROR'
-    message: str
-    progress_percentage: int
+from typing import Any, Dict, List, Optional, TypedDict
 
 
 class PicoFramework(TypedDict, total=False):
@@ -17,30 +9,27 @@ class PicoFramework(TypedDict, total=False):
 
 
 class LabGraphState(TypedDict, total=False):
-    # Core Review Identifiers & Parameters
+    """Checkpointed workflow state. Never contains BYOK keys (see core/key_vault.py)."""
+
+    # Core Review Identifiers & Protocol (defined by the researcher)
     review_id: str
     query: str
     topic: str
     pico: PicoFramework
     boolean_queries: List[str]
+    ai_assisted: bool
     inclusion_criteria: List[str]
     exclusion_criteria: List[str]
     max_papers: int
     year_start: Optional[int]
     year_end: Optional[int]
-    require_open_access: bool
-    byok_gemini_key: Optional[str]
-    byok_groq_key: Optional[str]
-
-    # Visual & Spatial Engine State (HD-2D Lab Mapping)
-    active_agent: str
-    current_bench: str
-    agent_statuses: Dict[str, str]
 
     # Paper Collections at Different Pipeline Stages
     raw_papers: List[Dict[str, Any]]
     screened_papers: List[Dict[str, Any]]
+    screening_log: List[Dict[str, Any]]
     audited_papers: List[Dict[str, Any]]
+    bias_arbitration_log: List[Dict[str, Any]]
 
     # Scientific Synthesis Outputs
     prisma_matrix: List[Dict[str, Any]]
@@ -50,13 +39,11 @@ class LabGraphState(TypedDict, total=False):
     current_step: str
     hitl_pending: bool
     hitl_checkpoint: Optional[str]
-    hitl_decision: Optional[Dict[str, Any]]
 
-    # Telemetry and Execution Status
+    # Execution Status
     status_message: str
-    logs: List[str]
     errors: List[str]
 
 
-# Backward-compatible alias for existing endpoints and tests
+# Backward-compatible alias
 CortexWorkflowState = LabGraphState

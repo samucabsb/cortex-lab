@@ -1,13 +1,26 @@
 import logging
+from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import settings
 from app.api.v1.router import router as v1_router
+from app.services.runtime import runtime
 
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
 )
+
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    # Opens the SQLite checkpointer (HITL pauses survive restarts) and the event log.
+    await runtime.start(settings.DB_PATH)
+    try:
+        yield
+    finally:
+        await runtime.stop()
+
 
 app = FastAPI(
     title=settings.PROJECT_NAME,
@@ -19,6 +32,7 @@ app = FastAPI(
     ),
     docs_url="/docs",
     redoc_url="/redoc",
+    lifespan=lifespan,
 )
 
 # Configure CORS
