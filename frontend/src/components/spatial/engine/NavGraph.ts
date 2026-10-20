@@ -1,76 +1,87 @@
 import { NavNode, Point2D } from "./types";
 
-export const LAB_NAV_NODES: Record<string, NavNode> = {
-  // Sala 01 (PICO & Protocolo)
-  room1_desk: { id: "room1_desk", roomId: "coordinator", x: 18.5, y: 29.5, label: "Bancada Dr. Turing" },
-  room1_center: { id: "room1_center", roomId: "coordinator", x: 22.5, y: 32.5, label: "Centro Sala 01" },
-  room1_door: { id: "room1_door", roomId: "coordinator", x: 27.5, y: 36.0, label: "Porta Sala 01" },
-
-  // Corredor Oeste
-  corridor_west_upper: { id: "corridor_west_upper", roomId: "corridor", x: 31.5, y: 40.5, label: "Corredor Noroeste" },
-  corridor_west_mid: { id: "corridor_west_mid", roomId: "corridor", x: 36.0, y: 48.0, label: "Entrada Oeste Sala Central" },
-  corridor_west_lower: { id: "corridor_west_lower", roomId: "corridor", x: 32.5, y: 57.0, label: "Corredor Sudoeste" },
-
-  // Sala 02 (Mineração & Validação DOI)
-  room2_door: { id: "room2_door", roomId: "mining", x: 29.5, y: 63.5, label: "Porta Sala 02" },
-  room2_center: { id: "room2_center", roomId: "mining", x: 20.5, y: 64.5, label: "Centro Sala 02" },
-  room2_ada_desk: { id: "room2_ada_desk", roomId: "mining", x: 24.0, y: 66.5, label: "Bancada Dra. Ada" },
-  room2_cross_rack: { id: "room2_cross_rack", roomId: "mining", x: 14.5, y: 63.0, label: "Servidor Crossref Dr. Cross" },
-
-  // Sala 03 (Central HITL - Supervisão Humana)
-  room3_center_desk: { id: "room3_center_desk", roomId: "hitl", x: 51.5, y: 46.5, label: "Mesa Pesquisador Líder" },
-
-  // Corredor Leste
-  corridor_east_upper: { id: "corridor_east_upper", roomId: "corridor", x: 67.5, y: 41.5, label: "Corredor Nordeste" },
-  corridor_east_mid: { id: "corridor_east_mid", roomId: "corridor", x: 62.0, y: 48.0, label: "Entrada Leste Sala Central" },
-  corridor_east_lower: { id: "corridor_east_lower", roomId: "corridor", x: 66.5, y: 58.5, label: "Corredor Sudeste" },
-
-  // Sala 04 (Auditoria RoB 2 & Métodos)
-  room4_door: { id: "room4_door", roomId: "auditing", x: 72.0, y: 35.5, label: "Porta Sala 04" },
-  room4_center: { id: "room4_center", roomId: "auditing", x: 77.0, y: 31.5, label: "Centro Sala 04" },
-  room4_fitz_desk: { id: "room4_fitz_desk", roomId: "auditing", x: 78.5, y: 34.0, label: "Bancada Dr. Fitz" },
-  room4_cochrane_desk: { id: "room4_cochrane_desk", roomId: "auditing", x: 85.5, y: 24.5, label: "Bancada Dra. Cochrane" },
-
-  // Sala 05 (Biblioteca PRISMA)
-  room5_door: { id: "room5_door", roomId: "synthesis", x: 71.0, y: 66.5, label: "Porta Sala 05" },
-  room5_center: { id: "room5_center", roomId: "synthesis", x: 76.5, y: 72.0, label: "Centro Sala 05" },
-  room5_rosalind_desk: { id: "room5_rosalind_desk", roomId: "synthesis", x: 83.0, y: 76.5, label: "Mesa Dra. Rosalind" },
-};
-
-// Adjacency graph representing physical corridors and doors
-export const LAB_ADJACENCY: Record<string, string[]> = {
-  room1_desk: ["room1_center"],
-  room1_center: ["room1_desk", "room1_door"],
-  room1_door: ["room1_center", "corridor_west_upper"],
-
-  corridor_west_upper: ["room1_door", "corridor_west_mid"],
-  corridor_west_mid: ["corridor_west_upper", "corridor_west_lower", "room3_center_desk"],
-  corridor_west_lower: ["corridor_west_mid", "room2_door"],
-
-  room2_door: ["corridor_west_lower", "room2_center"],
-  room2_center: ["room2_door", "room2_ada_desk", "room2_cross_rack"],
-  room2_ada_desk: ["room2_center", "room2_cross_rack"],
-  room2_cross_rack: ["room2_center", "room2_ada_desk"],
-
-  room3_center_desk: ["corridor_west_mid", "corridor_east_mid"],
-
-  corridor_east_mid: ["room3_center_desk", "corridor_east_upper", "corridor_east_lower"],
-  corridor_east_upper: ["corridor_east_mid", "room4_door"],
-  corridor_east_lower: ["corridor_east_mid", "room5_door"],
-
-  room4_door: ["corridor_east_upper", "room4_center"],
-  room4_center: ["room4_door", "room4_fitz_desk", "room4_cochrane_desk"],
-  room4_fitz_desk: ["room4_center", "room4_cochrane_desk"],
-  room4_cochrane_desk: ["room4_center", "room4_fitz_desk"],
-
-  room5_door: ["corridor_east_lower", "room5_center"],
-  room5_center: ["room5_door", "room5_rosalind_desk"],
-  room5_rosalind_desk: ["room5_center"],
-};
-
 /**
- * Calculates Euclidean distance between two points in percentage units.
+ * 2D Panoramic Laboratory Navigation Mesh (mapped to lab_2d_panoramic.jpg)
+ * Top Floor (Rooms 1-5): Y ~ 54% (Workstations) to Y ~ 72% (Room Doors)
+ * Bottom Corridor Floor: Y ~ 84% (Main Walkway between Doors 1, 2, 3, 4, 5)
  */
+export const LAB_NAV_NODES: Record<string, NavNode> = {
+  // Sala 01: Protocol Room (Dr. Turing)
+  room1_desk: { id: "room1_desk", roomId: "coordinator", x: 10.0, y: 54.0, label: "Quadro & Terminal Dr. Turing" },
+  room1_door: { id: "room1_door", roomId: "coordinator", x: 10.0, y: 72.0, label: "Porta 1 (Sala 01)" },
+
+  // Sala 02: Server & Mining Room (Dra. Ada & Dr. Cross)
+  room2_cross_rack: { id: "room2_cross_rack", roomId: "mining", x: 25.0, y: 54.0, label: "Rack Validação Dr. Cross" },
+  room2_ada_desk: { id: "room2_ada_desk", roomId: "mining", x: 34.0, y: 54.0, label: "Bancada Mineração Dra. Ada" },
+  room2_door: { id: "room2_door", roomId: "mining", x: 30.0, y: 72.0, label: "Porta 2 (Sala 02)" },
+
+  // Sala 03: Central Command HITL (Você / PI Humano)
+  room3_center_desk: { id: "room3_center_desk", roomId: "hitl", x: 50.0, y: 54.0, label: "Mesa Comando Central HITL" },
+  room3_door: { id: "room3_door", roomId: "hitl", x: 50.0, y: 72.0, label: "Porta 3 (Sala 03)" },
+
+  // Sala 04: Auditing & Biostatistics (Dr. Fitz & Dra. Cochrane)
+  room4_fitz_desk: { id: "room4_fitz_desk", roomId: "auditing", x: 66.0, y: 54.0, label: "Microscópio Dr. Fitz" },
+  room4_cochrane_desk: { id: "room4_cochrane_desk", roomId: "auditing", x: 74.0, y: 54.0, label: "Mesa RoB 2 Dra. Cochrane" },
+  room4_door: { id: "room4_door", roomId: "auditing", x: 70.0, y: 72.0, label: "Porta 4 (Sala 04)" },
+
+  // Sala 05: Research Library (Dra. Rosalind)
+  room5_rosalind_desk: { id: "room5_rosalind_desk", roomId: "synthesis", x: 88.0, y: 54.0, label: "Mesa Biblioteca Dra. Rosalind" },
+  room5_door: { id: "room5_door", roomId: "synthesis", x: 89.0, y: 72.0, label: "Porta 5 (Sala 05)" },
+
+  // Corredor Horizontal Inferior (Caminhada física entre portas 1, 2, 3, 4, 5)
+  corridor_door1: { id: "corridor_door1", roomId: "corridor", x: 10.0, y: 84.0, label: "Corredor Porta 1" },
+  corridor_mid_1_2: { id: "corridor_mid_1_2", roomId: "corridor", x: 20.0, y: 84.0, label: "Corredor Salas 1-2" },
+  corridor_door2: { id: "corridor_door2", roomId: "corridor", x: 30.0, y: 84.0, label: "Corredor Porta 2" },
+  corridor_mid_2_3: { id: "corridor_mid_2_3", roomId: "corridor", x: 40.0, y: 84.0, label: "Corredor Salas 2-3" },
+  corridor_door3: { id: "corridor_door3", roomId: "corridor", x: 50.0, y: 84.0, label: "Corredor Porta 3" },
+  corridor_mid_3_4: { id: "corridor_mid_3_4", roomId: "corridor", x: 60.0, y: 84.0, label: "Corredor Salas 3-4" },
+  corridor_door4: { id: "corridor_door4", roomId: "corridor", x: 70.0, y: 84.0, label: "Corredor Porta 4" },
+  corridor_mid_4_5: { id: "corridor_mid_4_5", roomId: "corridor", x: 80.0, y: 84.0, label: "Corredor Salas 4-5" },
+  corridor_door5: { id: "corridor_door5", roomId: "corridor", x: 89.0, y: 84.0, label: "Corredor Porta 5" },
+};
+
+// Topological Adjacency Graph connecting 2D rooms through corridor doorways
+export const LAB_ADJACENCY: Record<string, string[]> = {
+  // Sala 1
+  room1_desk: ["room1_door"],
+  room1_door: ["room1_desk", "corridor_door1"],
+
+  // Corredor Door 1
+  corridor_door1: ["room1_door", "corridor_mid_1_2"],
+  corridor_mid_1_2: ["corridor_door1", "corridor_door2"],
+
+  // Sala 2
+  corridor_door2: ["corridor_mid_1_2", "corridor_mid_2_3", "room2_door"],
+  room2_door: ["corridor_door2", "room2_cross_rack", "room2_ada_desk"],
+  room2_cross_rack: ["room2_door", "room2_ada_desk"],
+  room2_ada_desk: ["room2_door", "room2_cross_rack"],
+
+  // Corredor Salas 2-3
+  corridor_mid_2_3: ["corridor_door2", "corridor_door3"],
+
+  // Sala 3
+  corridor_door3: ["corridor_mid_2_3", "corridor_mid_3_4", "room3_door"],
+  room3_door: ["corridor_door3", "room3_center_desk"],
+  room3_center_desk: ["room3_door"],
+
+  // Corredor Salas 3-4
+  corridor_mid_3_4: ["corridor_door3", "corridor_door4"],
+
+  // Sala 4
+  corridor_door4: ["corridor_mid_3_4", "corridor_mid_4_5", "room4_door"],
+  room4_door: ["corridor_door4", "room4_fitz_desk", "room4_cochrane_desk"],
+  room4_fitz_desk: ["room4_door", "room4_cochrane_desk"],
+  room4_cochrane_desk: ["room4_door", "room4_fitz_desk"],
+
+  // Corredor Salas 4-5
+  corridor_mid_4_5: ["corridor_door4", "corridor_door5"],
+
+  // Sala 5
+  corridor_door5: ["corridor_mid_4_5", "room5_door"],
+  room5_door: ["corridor_door5", "room5_rosalind_desk"],
+  room5_rosalind_desk: ["room5_door"],
+};
+
 function dist(p1: Point2D, p2: Point2D): number {
   const dx = p1.x - p2.x;
   const dy = p1.y - p2.y;
@@ -78,8 +89,7 @@ function dist(p1: Point2D, p2: Point2D): number {
 }
 
 /**
- * A* / Dijkstra pathfinding over the Lab Navigation Graph.
- * Returns the sequence of Point2D coordinates that respects corridors, doors, and walls.
+ * A* / Dijkstra pathfinding over the 2D Panoramic NavGraph.
  */
 export function findPathBetweenNodes(startNodeId: string, targetNodeId: string): Point2D[] {
   if (startNodeId === targetNodeId) {
@@ -92,7 +102,6 @@ export function findPathBetweenNodes(startNodeId: string, targetNodeId: string):
   const costSoFar: Record<string, number> = { [startNodeId]: 0 };
 
   while (queue.length > 0) {
-    // Pick node with lowest cost
     queue.sort((a, b) => (costSoFar[a] || 0) - (costSoFar[b] || 0));
     const current = queue.shift()!;
 
@@ -117,9 +126,7 @@ export function findPathBetweenNodes(startNodeId: string, targetNodeId: string):
     }
   }
 
-  // Reconstruct path
   if (!cameFrom[targetNodeId]) {
-    // Fallback: direct segment if disconnected
     const s = LAB_NAV_NODES[startNodeId];
     const t = LAB_NAV_NODES[targetNodeId];
     return [s ? { x: s.x, y: s.y } : { x: 50, y: 50 }, t ? { x: t.x, y: t.y } : { x: 50, y: 50 }];

@@ -4,7 +4,7 @@ import React, { useEffect, useRef } from "react";
 import { X, CheckCircle2, FileCode2, BookOpen, Sparkles, ExternalLink, Activity } from "lucide-react";
 import { AgentBenchId } from "@/types";
 import { INITIAL_SCIENTISTS } from "./engine/PixelLabEngine";
-import { drawPixelScientistCharacter } from "./engine/PixelCharacterRenderer";
+import { drawRealPixelSprite } from "./engine/CharacterAtlas";
 
 
 
@@ -207,15 +207,15 @@ const ScientistAvatarCanvas: React.FC<{ scientistId: string }> = ({ scientistId 
       ctx.ellipse(36, 62, 22, 6, 0, 0, Math.PI * 2);
       ctx.fill();
 
-      // Render breathing scientist at pixelScale = 2.4
-      drawPixelScientistCharacter({
+      // Render real 16-bit pixel art sprite
+      drawRealPixelSprite({
         ctx,
-        cx: 36,
-        cy: 60,
-        pixelScale: 2.4,
-        appearance: { ...appearance, facing: "right" },
+        scientistId,
         state: "IDLE",
         facing: "right",
+        x: 36,
+        y: 64,
+        targetHeight: 54,
         frameTick: tick,
       });
     };

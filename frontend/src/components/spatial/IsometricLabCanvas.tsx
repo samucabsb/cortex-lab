@@ -52,7 +52,7 @@ export const IsometricLabCanvas: React.FC<IsometricLabCanvasProps> = ({
   // Preload background map
   useEffect(() => {
     const img = new Image();
-    img.src = "/assets/hd2d-empty-lab.jpg";
+    img.src = "/assets/lab_2d_panoramic.jpg";
     img.onload = () => {
       bgImageRef.current = img;
     };
@@ -321,60 +321,60 @@ export const IsometricLabCanvas: React.FC<IsometricLabCanvasProps> = ({
             <RotateCcw size={15} />
           </button>
         </div>
+      </div>
 
-        {/* Bottom Interactive Room Selector Bar */}
-        <div className="absolute bottom-4 left-4 right-4 z-20 flex flex-wrap items-center justify-center gap-2">
-          {[
-            {
-              room: "coordinator" as AgentBenchId,
-              phase: 0,
-              label: "Sala 1: PICO",
-            },
-            {
-              room: "mining" as AgentBenchId,
-              phase: 2,
-              label: "Sala 2: Mineração & DOI",
-            },
-            {
-              room: "hitl" as AgentBenchId,
-              phase: 5,
-              label: "Sala 3: Supervisão HITL (Você)",
-            },
-            {
-              room: "auditing" as AgentBenchId,
-              phase: 8,
-              label: "Sala 4: Auditoria RoB 2",
-            },
-            {
-              room: "synthesis" as AgentBenchId,
-              phase: 11,
-              label: "Sala 5: Biblioteca PRISMA",
-            },
-          ].map((btn) => {
-            const isRoomActive =
-              currentPhaseObj.roomId === btn.room ||
-              selectedBenchId === btn.room;
-            return (
-              <button
-                key={btn.room}
-                onClick={() => jumpToRoomPhase(btn.room, btn.phase)}
-                className={`px-3.5 py-2 rounded-xl text-xs font-bold border transition cursor-pointer flex items-center gap-2 shadow-md ${
-                  isRoomActive
-                    ? "bg-white text-slate-950 border-white scale-105"
-                    : "bg-slate-900/85 text-slate-200 border-slate-700 hover:bg-slate-800"
-                }`}
-              >
-                <CheckCircle2
-                  size={13}
-                  className={
-                    isRoomActive ? "text-blue-600" : "text-emerald-400"
-                  }
-                />
-                <span>{btn.label}</span>
-              </button>
-            );
-          })}
-        </div>
+      {/* Interactive Room & Stage Selector Bar (Below Lab Viewport) */}
+      <div className="flex flex-wrap items-center justify-center gap-2 p-2 rounded-2xl bg-slate-900/90 border border-slate-800 shadow-lg">
+        {[
+          {
+            room: "coordinator" as AgentBenchId,
+            phase: 0,
+            label: "Sala 1: PICO",
+          },
+          {
+            room: "mining" as AgentBenchId,
+            phase: 2,
+            label: "Sala 2: Mineração & DOI",
+          },
+          {
+            room: "hitl" as AgentBenchId,
+            phase: 5,
+            label: "Sala 3: Supervisão HITL (Você)",
+          },
+          {
+            room: "auditing" as AgentBenchId,
+            phase: 8,
+            label: "Sala 4: Auditoria RoB 2",
+          },
+          {
+            room: "synthesis" as AgentBenchId,
+            phase: 11,
+            label: "Sala 5: Biblioteca PRISMA",
+          },
+        ].map((btn) => {
+          const isRoomActive =
+            currentPhaseObj.roomId === btn.room ||
+            selectedBenchId === btn.room;
+          return (
+            <button
+              key={btn.room}
+              onClick={() => jumpToRoomPhase(btn.room, btn.phase)}
+              className={`px-3.5 py-2 rounded-xl text-xs font-bold border transition cursor-pointer flex items-center gap-2 shadow-sm ${
+                isRoomActive
+                  ? "bg-sky-500 text-white border-sky-400 shadow-md scale-105"
+                  : "bg-slate-800/90 text-slate-300 border-slate-700 hover:bg-slate-750 hover:text-white"
+              }`}
+            >
+              <CheckCircle2
+                size={13}
+                className={
+                  isRoomActive ? "text-white" : "text-emerald-400"
+                }
+              />
+              <span>{btn.label}</span>
+            </button>
+          );
+        })}
       </div>
 
       {/* Scientist Dossier Modal */}

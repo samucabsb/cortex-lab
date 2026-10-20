@@ -7,10 +7,14 @@ import {
   StageHandoff,
 } from "./types";
 import { LAB_NAV_NODES, findPathBetweenNodes } from "./NavGraph";
-import { renderOcclusionElements } from "./OcclusionLayer";
-import { drawPixelScientistCharacter } from "./PixelCharacterRenderer";
 import { renderAtmosphereFX } from "./AtmosphereFX";
 import { drawPixelEmote } from "./EmoteSystem";
+import {
+  preloadCharacterSprites,
+  drawRealPixelSprite,
+  getCharacterSpriteImage,
+} from "./CharacterAtlas";
+
 
 
 // 7 Scientist Initial Appearances & Starting Nodes
@@ -108,7 +112,7 @@ export const INITIAL_SCIENTISTS: CharacterAppearance[] = [
   },
 ];
 
-// Workflow Handoff Stages mapped directly to the Navigation Graph
+// Workflow Handoff Stages mapped directly to the 2D Panoramic Navigation Graph
 export const STAGE_HANDOFFS: StageHandoff[] = [
   {
     phaseId: 0,
@@ -117,7 +121,7 @@ export const STAGE_HANDOFFS: StageHandoff[] = [
     roomId: "coordinator",
     item: { id: "pico", label: "PICO", color: "#38bdf8", glowColor: "rgba(56, 189, 248, 0.4)" },
     pathNodeIds: ["room1_desk"],
-    banner: "Sala 01: Dr. Turing estrutura o protocolo PICO 2x2 e queries booleanas no quadro digital.",
+    banner: "Sala 01: Dr. Turing estrutura o protocolo PICO 2x2 e queries booleanas no terminal da sala.",
     durationMs: 3400,
     emote: "bulb",
   },
@@ -128,8 +132,8 @@ export const STAGE_HANDOFFS: StageHandoff[] = [
     toActorId: "ada",
     roomId: "coordinator",
     item: { id: "pico", label: "PICO", color: "#38bdf8", glowColor: "rgba(56, 189, 248, 0.4)" },
-    pathNodeIds: ["room1_desk", "room1_center", "room1_door", "corridor_west_upper", "corridor_west_mid", "corridor_west_lower", "room2_door", "room2_center", "room2_ada_desk"],
-    banner: "Corredor Oeste: Dr. Turing caminha pela porta até a Sala 02 para entregar o protocolo à Dra. Ada.",
+    pathNodeIds: ["room1_desk", "room1_door", "corridor_door1", "corridor_mid_1_2", "corridor_door2", "room2_door", "room2_ada_desk"],
+    banner: "Corredor: Dr. Turing desce pela Porta 1, caminha pelo corredor até a Porta 2 e entrega o protocolo à Dra. Ada.",
     durationMs: 4200,
     emote: "bulb",
   },
@@ -151,7 +155,7 @@ export const STAGE_HANDOFFS: StageHandoff[] = [
     toActorId: "cross",
     roomId: "mining",
     item: { id: "raw_papers", label: "Papers", color: "#60a5fa", glowColor: "rgba(96, 165, 250, 0.4)" },
-    pathNodeIds: ["room2_ada_desk", "room2_center", "room2_cross_rack"],
+    pathNodeIds: ["room2_ada_desk", "room2_cross_rack"],
     banner: "Sala 02 (Passagem Interna): Dra. Ada entrega os artigos brutos para o Dr. Cross no rack de servidores.",
     durationMs: 2500,
     emote: "search",
@@ -174,8 +178,8 @@ export const STAGE_HANDOFFS: StageHandoff[] = [
     toActorId: "human",
     roomId: "hitl",
     item: { id: "verified_dois", label: "DOIs", color: "#f59e0b", glowColor: "rgba(245, 158, 11, 0.4)" },
-    pathNodeIds: ["room2_cross_rack", "room2_center", "room2_door", "corridor_west_lower", "corridor_west_mid", "room3_center_desk"],
-    banner: "Corredor Central: Dr. Cross leva os artigos validados para a sua mesa na Sala de Supervisão Humana.",
+    pathNodeIds: ["room2_cross_rack", "room2_door", "corridor_door2", "corridor_mid_2_3", "corridor_door3", "room3_door", "room3_center_desk"],
+    banner: "Corredor: Dr. Cross desce pela Porta 2, anda pelo corredor até a Porta 3 e entrega os artigos ao Comando Central.",
     durationMs: 4000,
     emote: "shield",
   },
@@ -197,8 +201,8 @@ export const STAGE_HANDOFFS: StageHandoff[] = [
     toActorId: "fitz",
     roomId: "auditing",
     item: { id: "approved_papers", label: "Aprovados", color: "#10b981", glowColor: "rgba(16, 185, 129, 0.4)" },
-    pathNodeIds: ["room3_center_desk", "corridor_east_mid", "corridor_east_upper", "room4_door", "room4_center", "room4_fitz_desk"],
-    banner: "Corredor Leste: Seu avatar caminha até a Sala 04 para entregar os artigos aprovados ao Dr. Fitz.",
+    pathNodeIds: ["room3_center_desk", "room3_door", "corridor_door3", "corridor_mid_3_4", "corridor_door4", "room4_door", "room4_fitz_desk"],
+    banner: "Corredor: Seu avatar desce pela Porta 3, anda pelo corredor até a Porta 4 e entrega os artigos aprovados ao Dr. Fitz.",
     durationMs: 4200,
     emote: "stamp",
   },
@@ -220,7 +224,7 @@ export const STAGE_HANDOFFS: StageHandoff[] = [
     toActorId: "cochrane",
     roomId: "auditing",
     item: { id: "stats", label: "Stats N", color: "#f43f5e", glowColor: "rgba(244, 63, 94, 0.4)" },
-    pathNodeIds: ["room4_fitz_desk", "room4_center", "room4_cochrane_desk"],
+    pathNodeIds: ["room4_fitz_desk", "room4_cochrane_desk"],
     banner: "Sala 04 (Passagem Interna): Dr. Fitz entrega os dados de amostra para a Dra. Cochrane auditar o risco de viés.",
     durationMs: 2200,
     emote: "micro",
@@ -243,8 +247,8 @@ export const STAGE_HANDOFFS: StageHandoff[] = [
     toActorId: "rosalind",
     roomId: "synthesis",
     item: { id: "rob2_audit", label: "RoB 2", color: "#e11d48", glowColor: "rgba(225, 29, 72, 0.4)" },
-    pathNodeIds: ["room4_cochrane_desk", "room4_center", "room4_door", "corridor_east_upper", "corridor_east_mid", "corridor_east_lower", "room5_door", "room5_center", "room5_rosalind_desk"],
-    banner: "Corredor Sudeste: Dra. Cochrane leva os laudos metodológicos para a Dra. Rosalind na Biblioteca.",
+    pathNodeIds: ["room4_cochrane_desk", "room4_door", "corridor_door4", "corridor_mid_4_5", "corridor_door5", "room5_door", "room5_rosalind_desk"],
+    banner: "Corredor: Dra. Cochrane sai pela Porta 4, caminha até a Porta 5 e leva os laudos metodológicos para a Dra. Rosalind na Biblioteca.",
     durationMs: 4400,
     emote: "scales",
   },
@@ -283,6 +287,9 @@ export class PixelLabEngine {
 
   constructor() {
     this.initActors();
+    if (typeof window !== "undefined") {
+      preloadCharacterSprites();
+    }
   }
 
   private initActors() {
@@ -501,8 +508,9 @@ export class PixelLabEngine {
       (a, b) => a.position.y - b.position.y
     );
 
-    // 5. Render Actors and Dynamic Occlusion Layer
-    // We render actors, and any actor behind an occlusion threshold gets occluded by foreground elements
+    const targetHeight = Math.max(48, Math.round(canvasHeight * 0.17));
+
+    // 5. Render Actors using Real 16-bit Pixel Art Sprites
     for (const actor of sortedActors) {
       const cx = (actor.position.x / 100) * canvasWidth;
       const cy = (actor.position.y / 100) * canvasHeight;
@@ -516,35 +524,31 @@ export class PixelLabEngine {
         }
       }
 
-      drawPixelScientistCharacter({
+      drawRealPixelSprite({
         ctx,
-        cx,
-        cy,
-        pixelScale,
-        appearance: actor.appearance,
+        scientistId: actor.id,
         state: actor.state,
         facing: actor.facing,
+        x: cx,
+        y: cy,
+        targetHeight,
         frameTick: actor.animationTick,
-        carryingItem: actor.carryingItem,
         speechBubble: bubbleText,
         isHovered: actor.id === this.hoveredActorId,
       });
 
-      // Floating Pixel Emote above the active scientist's head!
+      // Floating Pixel Emote above the active scientist's head
       if (this.getCurrentPhase().emote && actor.id === this.getCurrentPhase().fromActorId) {
         drawPixelEmote(
           ctx,
           cx,
-          cy - 20 * pixelScale,
+          cy - targetHeight - 14,
           pixelScale,
           this.getCurrentPhase().emote!,
           this.globalTick
         );
       }
     }
-
-    // 6. Render Foreground Occlusion Elements (Door Arches and Front Desk Lips)
-    renderOcclusionElements(ctx, canvasWidth, canvasHeight, pixelScale, this.debugMode);
   }
 
 }
