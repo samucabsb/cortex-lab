@@ -1,8 +1,12 @@
 "use client";
 
-import React from "react";
+import React, { useEffect, useRef } from "react";
 import { X, CheckCircle2, FileCode2, BookOpen, Sparkles, ExternalLink, Activity } from "lucide-react";
 import { AgentBenchId } from "@/types";
+import { INITIAL_SCIENTISTS } from "./engine/PixelLabEngine";
+import { drawPixelScientistCharacter } from "./engine/PixelCharacterRenderer";
+
+
 
 export interface ScientistProfile {
   id: string;
@@ -171,6 +175,65 @@ export const SCIENTIST_PROFILES: Record<string, ScientistProfile> = {
   },
 };
 
+const ScientistAvatarCanvas: React.FC<{ scientistId: string }> = ({ scientistId }) => {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    const appearance = INITIAL_SCIENTISTS.find((s) => s.id === scientistId);
+    if (!appearance) return;
+
+    let animId: number;
+    let tick = 0;
+
+    const loop = () => {
+      animId = requestAnimationFrame(loop);
+      tick++;
+
+      ctx.imageSmoothingEnabled = false;
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      // Dark sci-fi lab background
+      ctx.fillStyle = "#0f172a";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      // Subtle floor ring
+      ctx.fillStyle = "#1e293b";
+      ctx.beginPath();
+      ctx.ellipse(36, 62, 22, 6, 0, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Render breathing scientist at pixelScale = 2.4
+      drawPixelScientistCharacter({
+        ctx,
+        cx: 36,
+        cy: 60,
+        pixelScale: 2.4,
+        appearance: { ...appearance, facing: "right" },
+        state: "IDLE",
+        facing: "right",
+        frameTick: tick,
+      });
+    };
+
+    animId = requestAnimationFrame(loop);
+    return () => cancelAnimationFrame(animId);
+  }, [scientistId]);
+
+  return (
+    <canvas
+      ref={canvasRef}
+      width={72}
+      height={72}
+      className="w-[72px] h-[72px] rounded-2xl border-2 border-slate-300 bg-slate-900 shadow-md shrink-0 block"
+    />
+  );
+};
+
 interface ScientistDossierModalProps {
   scientistId: string | null;
   onClose: () => void;
@@ -196,25 +259,28 @@ export const ScientistDossierModal: React.FC<ScientistDossierModalProps> = ({
         />
 
         <div className="p-6 md:p-8 overflow-y-auto space-y-6">
-          {/* Top Bar: Title & Close Button */}
+          {/* Top Bar: Title, Live Pixel Avatar & Close Button */}
           <div className="flex items-start justify-between gap-4">
-            <div className="space-y-1">
-              <div className="flex flex-wrap items-center gap-2">
-                <span
-                  className={`px-3 py-1 rounded-full text-xs font-bold border ${profile.badgeBg} ${profile.badgeText}`}
-                >
-                  {profile.roomName}
-                </span>
-                <span className="px-2.5 py-0.5 rounded-md bg-slate-100 text-slate-600 text-xs font-mono font-medium">
-                  ID: {profile.id}
-                </span>
+            <div className="flex items-center gap-4">
+              <ScientistAvatarCanvas scientistId={profile.id} />
+              <div className="space-y-1">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span
+                    className={`px-3 py-1 rounded-full text-xs font-bold border ${profile.badgeBg} ${profile.badgeText}`}
+                  >
+                    {profile.roomName}
+                  </span>
+                  <span className="px-2.5 py-0.5 rounded-md bg-slate-100 text-slate-600 text-xs font-mono font-medium">
+                    ID: {profile.id}
+                  </span>
+                </div>
+                <h2 className="serif-title text-2xl md:text-3xl font-bold text-slate-900">
+                  {profile.name}
+                </h2>
+                <p className="text-sm font-semibold text-slate-600">
+                  {profile.role}
+                </p>
               </div>
-              <h2 className="serif-title text-2xl md:text-3xl font-bold text-slate-900">
-                {profile.name}
-              </h2>
-              <p className="text-sm font-semibold text-slate-600">
-                {profile.role}
-              </p>
             </div>
 
             <button
@@ -225,6 +291,7 @@ export const ScientistDossierModal: React.FC<ScientistDossierModalProps> = ({
               <X size={20} />
             </button>
           </div>
+
 
           {/* Description */}
           <p className="text-sm md:text-base text-slate-600 leading-relaxed bg-slate-50 p-4 rounded-2xl border border-slate-200/70">
