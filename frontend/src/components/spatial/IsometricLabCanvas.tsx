@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 import { PixelLabEngine, STAGE_HANDOFFS } from "./engine/PixelLabEngine";
 import { LAB_NAV_NODES } from "./engine/NavGraph";
+import { ScientistDossierModal } from "./ScientistDossierModal";
 
 interface IsometricLabCanvasProps {
   currentStep: string;
@@ -39,6 +40,9 @@ export const IsometricLabCanvas: React.FC<IsometricLabCanvasProps> = ({
   const [activePhaseId, setActivePhaseId] = useState<number>(0);
   const [isAutoPlaying, setIsAutoPlaying] = useState<boolean>(true);
   const [debugMode, setDebugMode] = useState<boolean>(false);
+  const [playbackSpeed, setPlaybackSpeed] = useState<number>(1.0);
+  const [selectedScientistId, setSelectedScientistId] = useState<string | null>(null);
+
 
   // Initialize engine once
   if (!engineRef.current) {
@@ -165,7 +169,16 @@ export const IsometricLabCanvas: React.FC<IsometricLabCanvasProps> = ({
             const clickX = ((e.clientX - rect.left) / rect.width) * 100;
             const clickY = ((e.clientY - rect.top) / rect.height) * 100;
 
-            // Find closest scientist/room clicked
+            // 1. Direct hit-testing on scientists
+            if (engineRef.current) {
+              const clickedActor = engineRef.current.getActorAtPoint(clickX, clickY);
+              if (clickedActor) {
+                setSelectedScientistId(clickedActor.id);
+                return;
+              }
+            }
+
+            // 2. Otherwise find closest scientist/room clicked
             let closestRoom: AgentBenchId = "hitl";
             let minDist = 999;
             for (const node of Object.values(LAB_NAV_NODES)) {
@@ -178,6 +191,19 @@ export const IsometricLabCanvas: React.FC<IsometricLabCanvasProps> = ({
             }
             onSelectBench(closestRoom);
           }}
+          onMouseMove={(e) => {
+            if (!engineRef.current) return;
+            const rect = e.currentTarget.getBoundingClientRect();
+            const hoverX = ((e.clientX - rect.left) / rect.width) * 100;
+            const hoverY = ((e.clientY - rect.top) / rect.height) * 100;
+            const actor = engineRef.current.getActorAtPoint(hoverX, hoverY);
+            engineRef.current.setHoveredActor(actor ? actor.id : null);
+          }}
+          onMouseLeave={() => {
+            if (engineRef.current) {
+              engineRef.current.setHoveredActor(null);
+            }
+          }}
           className="w-full h-full block cursor-pointer"
         />
 
@@ -189,8 +215,8 @@ export const IsometricLabCanvas: React.FC<IsometricLabCanvasProps> = ({
           </span>
         </div>
 
-        {/* Top Right Controls: Debug, Play/Pause, Step & HITL */}
-        <div className="absolute top-4 right-4 z-20 flex items-center gap-2">
+        {/* Top Right Controls: Speed, Dossier, Debug, Play/Pause, Step & HITL */}
+        <div className="absolute top-4 right-4 z-20 flex flex-wrap items-center gap-2">
           {hitlPending && (
             <button
               onClick={onOpenHitl}
@@ -200,6 +226,39 @@ export const IsometricLabCanvas: React.FC<IsometricLabCanvasProps> = ({
               <span>Aprovar Artigos (HITL)</span>
             </button>
           )}
+
+          {/* Speed Toggle Pills (0.5x, 1x, 2x) */}
+          <div className="flex items-center bg-slate-900/90 rounded-xl p-0.5 border border-slate-700 shadow-lg">
+            {[0.5, 1.0, 2.0].map((s) => (
+              <button
+                key={s}
+                onClick={() => {
+                  if (engineRef.current) {
+                    engineRef.current.setPlaybackSpeed(s);
+                    setPlaybackSpeed(s);
+                  }
+                }}
+                className={`px-2.5 py-1 rounded-lg text-xs font-bold transition cursor-pointer ${
+                  playbackSpeed === s
+                    ? "bg-blue-600 text-white shadow-sm"
+                    : "text-slate-400 hover:text-slate-200"
+                }`}
+                title={`Velocidade de observação: ${s}x`}
+              >
+                {s}x
+              </button>
+            ))}
+          </div>
+
+          {/* Scientist Dossier Button */}
+          <button
+            onClick={() => setSelectedScientistId(currentPhaseObj.fromActorId)}
+            className="px-3 py-2 rounded-xl bg-slate-900/90 hover:bg-slate-800 text-slate-200 text-xs font-bold border border-slate-700 flex items-center gap-1.5 shadow-lg cursor-pointer"
+            title="Abrir dossiê metodológico e módulo Python do cientista em ação"
+          >
+            <Sparkles size={13} className="text-sky-400" />
+            <span>Dossiê</span>
+          </button>
 
           {/* Debug Mesh Toggle */}
           <button
@@ -317,6 +376,19 @@ export const IsometricLabCanvas: React.FC<IsometricLabCanvasProps> = ({
           })}
         </div>
       </div>
+
+      {/* Scientist Dossier Modal */}
+      <ScientistDossierModal
+        scientistId={selectedScientistId}
+        onClose={() => setSelectedScientistId(null)}
+        onJumpToPhase={(phaseId) => {
+          if (engineRef.current) {
+            engineRef.current.setPhase(phaseId);
+            setActivePhaseId(phaseId);
+          }
+        }}
+      />
     </div>
   );
 };
+

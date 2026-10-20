@@ -9,6 +9,9 @@ import {
 import { LAB_NAV_NODES, findPathBetweenNodes } from "./NavGraph";
 import { renderOcclusionElements } from "./OcclusionLayer";
 import { drawPixelScientistCharacter } from "./PixelCharacterRenderer";
+import { renderAtmosphereFX } from "./AtmosphereFX";
+import { drawPixelEmote } from "./EmoteSystem";
+
 
 // 7 Scientist Initial Appearances & Starting Nodes
 export const INITIAL_SCIENTISTS: CharacterAppearance[] = [
@@ -116,6 +119,7 @@ export const STAGE_HANDOFFS: StageHandoff[] = [
     pathNodeIds: ["room1_desk"],
     banner: "Sala 01: Dr. Turing estrutura o protocolo PICO 2x2 e queries booleanas no quadro digital.",
     durationMs: 3400,
+    emote: "bulb",
   },
   {
     phaseId: 1,
@@ -127,6 +131,7 @@ export const STAGE_HANDOFFS: StageHandoff[] = [
     pathNodeIds: ["room1_desk", "room1_center", "room1_door", "corridor_west_upper", "corridor_west_mid", "corridor_west_lower", "room2_door", "room2_center", "room2_ada_desk"],
     banner: "Corredor Oeste: Dr. Turing caminha pela porta até a Sala 02 para entregar o protocolo à Dra. Ada.",
     durationMs: 4200,
+    emote: "bulb",
   },
   {
     phaseId: 2,
@@ -137,6 +142,7 @@ export const STAGE_HANDOFFS: StageHandoff[] = [
     pathNodeIds: ["room2_ada_desk"],
     banner: "Sala 02: Dra. Ada minera artigos científicos nas bases abertas OpenAlex e PubMed.",
     durationMs: 3200,
+    emote: "search",
   },
   {
     phaseId: 3,
@@ -148,6 +154,7 @@ export const STAGE_HANDOFFS: StageHandoff[] = [
     pathNodeIds: ["room2_ada_desk", "room2_center", "room2_cross_rack"],
     banner: "Sala 02 (Passagem Interna): Dra. Ada entrega os artigos brutos para o Dr. Cross no rack de servidores.",
     durationMs: 2500,
+    emote: "search",
   },
   {
     phaseId: 4,
@@ -158,6 +165,7 @@ export const STAGE_HANDOFFS: StageHandoff[] = [
     pathNodeIds: ["room2_cross_rack"],
     banner: "Sala 02: Dr. Cross valida os DOIs via chamada oficial na API Crossref e remove duplicatas.",
     durationMs: 3200,
+    emote: "shield",
   },
   {
     phaseId: 5,
@@ -169,6 +177,7 @@ export const STAGE_HANDOFFS: StageHandoff[] = [
     pathNodeIds: ["room2_cross_rack", "room2_center", "room2_door", "corridor_west_lower", "corridor_west_mid", "room3_center_desk"],
     banner: "Corredor Central: Dr. Cross leva os artigos validados para a sua mesa na Sala de Supervisão Humana.",
     durationMs: 4000,
+    emote: "shield",
   },
   {
     phaseId: 6,
@@ -179,6 +188,7 @@ export const STAGE_HANDOFFS: StageHandoff[] = [
     pathNodeIds: ["room3_center_desk"],
     banner: "Sala 03: Você exerce controle soberano (HITL), carimbando os estudos que avançam para a auditoria.",
     durationMs: 3500,
+    emote: "stamp",
   },
   {
     phaseId: 7,
@@ -190,6 +200,7 @@ export const STAGE_HANDOFFS: StageHandoff[] = [
     pathNodeIds: ["room3_center_desk", "corridor_east_mid", "corridor_east_upper", "room4_door", "room4_center", "room4_fitz_desk"],
     banner: "Corredor Leste: Seu avatar caminha até a Sala 04 para entregar os artigos aprovados ao Dr. Fitz.",
     durationMs: 4200,
+    emote: "stamp",
   },
   {
     phaseId: 8,
@@ -200,6 +211,7 @@ export const STAGE_HANDOFFS: StageHandoff[] = [
     pathNodeIds: ["room4_fitz_desk"],
     banner: "Sala 04: Dr. Fitz extrai tamanho amostral (N), grupo controle e p-valores no microscópio.",
     durationMs: 3200,
+    emote: "micro",
   },
   {
     phaseId: 9,
@@ -211,6 +223,7 @@ export const STAGE_HANDOFFS: StageHandoff[] = [
     pathNodeIds: ["room4_fitz_desk", "room4_center", "room4_cochrane_desk"],
     banner: "Sala 04 (Passagem Interna): Dr. Fitz entrega os dados de amostra para a Dra. Cochrane auditar o risco de viés.",
     durationMs: 2200,
+    emote: "micro",
   },
   {
     phaseId: 10,
@@ -221,6 +234,7 @@ export const STAGE_HANDOFFS: StageHandoff[] = [
     pathNodeIds: ["room4_cochrane_desk"],
     banner: "Sala 04: Dra. Cochrane classifica os domínios de aleatorização e viés segundo o padrão Cochrane RoB 2.",
     durationMs: 3200,
+    emote: "scales",
   },
   {
     phaseId: 11,
@@ -232,6 +246,7 @@ export const STAGE_HANDOFFS: StageHandoff[] = [
     pathNodeIds: ["room4_cochrane_desk", "room4_center", "room4_door", "corridor_east_upper", "corridor_east_mid", "corridor_east_lower", "room5_door", "room5_center", "room5_rosalind_desk"],
     banner: "Corredor Sudeste: Dra. Cochrane leva os laudos metodológicos para a Dra. Rosalind na Biblioteca.",
     durationMs: 4400,
+    emote: "scales",
   },
   {
     phaseId: 12,
@@ -242,6 +257,7 @@ export const STAGE_HANDOFFS: StageHandoff[] = [
     pathNodeIds: ["room5_rosalind_desk"],
     banner: "Sala 05 (Biblioteca): Dra. Rosalind consolida a Matriz PRISMA 2020, Knowledge Gaps e arquivos CSV/BibTeX!",
     durationMs: 4000,
+    emote: "book",
   },
 ];
 
@@ -262,6 +278,8 @@ export class PixelLabEngine {
   private isAutoPlaying: boolean = true;
   private debugMode: boolean = false;
   private hoveredActorId: string | null = null;
+  private playbackSpeed: number = 1.0;
+  private globalTick: number = 0;
 
   constructor() {
     this.initActors();
@@ -309,6 +327,14 @@ export class PixelLabEngine {
     return this.isAutoPlaying;
   }
 
+  public setPlaybackSpeed(speed: number) {
+    this.playbackSpeed = speed;
+  }
+
+  public getPlaybackSpeed(): number {
+    return this.playbackSpeed;
+  }
+
   public setDebug(enabled: boolean) {
     this.debugMode = enabled;
   }
@@ -323,6 +349,27 @@ export class PixelLabEngine {
 
   public setHoveredActor(actorId: string | null) {
     this.hoveredActorId = actorId;
+  }
+
+  public getActorAtPoint(xPct: number, yPct: number): Actor | null {
+    let closestActor: Actor | null = null;
+    let minDist = 7.0; // 7% radius tolerance
+    for (const actor of this.actors.values()) {
+      const d = Math.hypot(xPct - actor.position.x, yPct - actor.position.y);
+      if (d < minDist) {
+        minDist = d;
+        closestActor = actor;
+      }
+    }
+    return closestActor;
+  }
+
+  public getActorById(actorId: string): Actor | undefined {
+    return this.actors.get(actorId);
+  }
+
+  public getAllActors(): Actor[] {
+    return Array.from(this.actors.values());
   }
 
   private applyPhase(phase: StageHandoff) {
@@ -368,8 +415,10 @@ export class PixelLabEngine {
 
   public update(now: number) {
     const phase = this.getCurrentPhase();
-    const elapsed = now - this.phaseStartTime;
+    const elapsed = (now - this.phaseStartTime) * this.playbackSpeed;
     const progress = Math.min(1.0, elapsed / phase.durationMs);
+
+    this.globalTick++;
 
     // Auto-advance if enabled
     if (this.isAutoPlaying && elapsed >= phase.durationMs) {
@@ -423,7 +472,17 @@ export class PixelLabEngine {
 
     const pixelScale = Math.max(2, Math.round(canvasWidth / 380));
 
-    // 2. Debug: Draw NavGraph nodes and corridors if debugMode is on
+    // 2. Render Atmosphere FX (Server rack LEDs, screen glows & data sparks)
+    renderAtmosphereFX(
+      ctx,
+      canvasWidth,
+      canvasHeight,
+      pixelScale,
+      this.getCurrentPhase().roomId,
+      this.globalTick
+    );
+
+    // 3. Debug: Draw NavGraph nodes and corridors if debugMode is on
     if (this.debugMode) {
       ctx.strokeStyle = "rgba(56, 189, 248, 0.4)";
       ctx.lineWidth = 2;
@@ -437,12 +496,12 @@ export class PixelLabEngine {
       }
     }
 
-    // 3. Sort actors by Y (Depth Sorting so lower actors render over upper actors)
+    // 4. Sort actors by Y (Depth Sorting so lower actors render over upper actors)
     const sortedActors = Array.from(this.actors.values()).sort(
       (a, b) => a.position.y - b.position.y
     );
 
-    // 4. Render Actors and Dynamic Occlusion Layer
+    // 5. Render Actors and Dynamic Occlusion Layer
     // We render actors, and any actor behind an occlusion threshold gets occluded by foreground elements
     for (const actor of sortedActors) {
       const cx = (actor.position.x / 100) * canvasWidth;
@@ -470,9 +529,22 @@ export class PixelLabEngine {
         speechBubble: bubbleText,
         isHovered: actor.id === this.hoveredActorId,
       });
+
+      // Floating Pixel Emote above the active scientist's head!
+      if (this.getCurrentPhase().emote && actor.id === this.getCurrentPhase().fromActorId) {
+        drawPixelEmote(
+          ctx,
+          cx,
+          cy - 20 * pixelScale,
+          pixelScale,
+          this.getCurrentPhase().emote!,
+          this.globalTick
+        );
+      }
     }
 
-    // 5. Render Foreground Occlusion Elements (Door Arches and Front Desk Lips)
+    // 6. Render Foreground Occlusion Elements (Door Arches and Front Desk Lips)
     renderOcclusionElements(ctx, canvasWidth, canvasHeight, pixelScale, this.debugMode);
   }
+
 }

@@ -77,6 +77,15 @@ export interface OcclusionZone {
   type: "door_arch" | "pillar" | "front_desk";
 }
 
+export type EmoteType =
+  | "bulb"
+  | "search"
+  | "shield"
+  | "stamp"
+  | "scales"
+  | "micro"
+  | "book";
+
 export interface StageHandoff {
   phaseId: number;
   title: string;
@@ -87,4 +96,6 @@ export interface StageHandoff {
   pathNodeIds: string[];
   banner: string;
   durationMs: number;
+  emote?: EmoteType;
 }
+
