@@ -25,6 +25,8 @@ class LabGraphState(TypedDict, total=False):
     boolean_queries: List[str]
     inclusion_criteria: List[str]
     exclusion_criteria: List[str]
+    byok_gemini_key: Optional[str]
+    byok_groq_key: Optional[str]
 
     # Visual & Spatial Engine State (HD-2D Lab Mapping)
     active_agent: str

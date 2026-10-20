@@ -213,9 +213,7 @@ cortex-lab/
 │       └── deploy-hf-space.yml        # Deploy automático no Hugging Face Spaces
 ├── docs/
 │   ├── 01-discovery/
-│   │   ├── interview-script.md        # Roteiro The Mom Test (SciELO, CAPES, Qualis/SJR)
-│   │   ├── interview-template.md      # Template de registro de entrevistas de descoberta
-│   │   └── interviews/                # Pasta de logs reais das entrevistas (.gitkeep)
+│   │   └── desk-research-benchmark.md # Fundamentação científica (PRISMA 2020, RoB 2 & Benchmark de IA)
 │   ├── 02-requirements/
 │   │   └── functional-reqs.md         # Requisitos Funcionais e Não-Funcionais (SRS)
 │   ├── 03-architecture/
@@ -253,31 +251,24 @@ cortex-lab/
 ├── frontend/
 │   ├── src/
 │   │   ├── app/
-│   │   │   ├── globals.css            # Tema Daylight editorial e grid arquitetônico
-│   │   │   ├── layout.tsx             # Metadados e fontes Inter
-│   │   │   └── page.tsx               # Layout Split-View (Diorama + Caderno PRISMA)
+│   │   │   ├── globals.css            # Tema Editorial Daylight (#FAF9F6) e fontes
+│   │   │   ├── layout.tsx             # Metadados e estrutura raiz
+│   │   │   └── page.tsx               # Fluxo Guiado de 4 Etapas + Caderno Editorial
 │   │   ├── store/
 │   │   │   └── useLabStore.ts         # Estado reativo Zustand com suporte a BYOK
 │   │   ├── hooks/
 │   │   │   └── useAgentStream.ts      # Consumo em tempo real de eventos SSE
-│   │   ├── engine/
-│   │   │   ├── isometricMath.ts       # Matemática de projeções 2.5D desacoplada
-│   │   │   └── labMapConfig.ts        # Layout e coordenadas das bancadas científicas
 │   │   ├── components/
 │   │   │   ├── spatial/
-│   │   │   │   ├── IsometricLabCanvas.tsx  # Diorama iluminado do laboratório
-│   │   │   │   ├── AgentStatusBadge.tsx    # Badges limpos dos agentes
-│   │   │   │   └── DataConduitLines.tsx    # Linhas arquitetônicas de fluxo de dados
+│   │   │   │   └── IsometricLabCanvas.tsx  # Laboratório 3D WebGL (Three.js) interativo
 │   │   │   ├── dashboard/
-│   │   │   │   ├── PrismaMatrixTable.tsx   # Tabela comparativa limpa estilo Elicit.com
-│   │   │   │   ├── KnowledgeGapsCard.tsx   # Card de lacunas de conhecimento
+│   │   │   │   ├── PrismaMatrixTable.tsx   # Tabela comparativa limpa estilo Elicit/Notion
+│   │   │   │   ├── KnowledgeGapsCard.tsx   # Cards editoriais de lacunas científicas
 │   │   │   │   └── ExportToolbar.tsx       # Exportação para CSV e BibTeX
-│   │   │   ├── hitl/
-│   │   │   │   └── HumanApprovalModal.tsx  # Modal de validação soberana do pesquisador
 │   │   │   └── settings/
 │   │   │       └── ByokConfigModal.tsx     # Modal para chaves gratuitas Gemini / Groq
 │   │   ├── lib/
-│   │   │   └── api.ts                 # Cliente de API com fallback para demonstração
+│   │   │   └── api.ts                 # Cliente HTTP com integração FastAPI e fallback
 │   │   └── types/
 │   │       └── index.ts               # Tipagens TypeScript estritas
 │   ├── package.json

@@ -5,346 +5,763 @@ import { IsometricLabCanvas } from "@/components/spatial/IsometricLabCanvas";
 import { PrismaMatrixTable } from "@/components/dashboard/PrismaMatrixTable";
 import { KnowledgeGapsCard } from "@/components/dashboard/KnowledgeGapsCard";
 import { ExportToolbar } from "@/components/dashboard/ExportToolbar";
-import { HumanApprovalModal } from "@/components/hitl/HumanApprovalModal";
 import { ByokConfigModal } from "@/components/settings/ByokConfigModal";
 import {
   MOCK_PAPERS,
   MOCK_PRISMA_ROWS,
   MOCK_GAPS,
+  MOCK_PICO,
+  MOCK_BOOLEAN_QUERIES,
   createReview,
+  submitHitlDecision,
 } from "@/lib/api";
-import { AgentBenchId, PaperItem, PrismaMatrixItem } from "@/types";
+import {
+  AgentBenchId,
+  PaperItem,
+  PrismaMatrixItem,
+  KnowledgeGapItem,
+  PicoData,
+} from "@/types";
 import { useLabStore } from "@/store/useLabStore";
 import { useAgentStream } from "@/hooks/useAgentStream";
 import {
-  Search,
   BookOpen,
   Github,
   Key,
   CheckCircle2,
+  ArrowRight,
+  ExternalLink,
+  AlertCircle,
+  Quote,
+  LayoutGrid,
+  Table2,
   Sparkles,
-  ChevronRight,
-  FileCheck2,
 } from "lucide-react";
 
+type WizardStep = 1 | 2 | 3 | 4;
+
 export default function CortexLabHomePage() {
-  const [topic, setTopic] = useState("Eficácia e toxicidade de CAR-T Cells em tumores sólidos");
+  const [wizardStep, setWizardStep] = useState<WizardStep>(1);
+  const [resultViewMode, setResultViewMode] = useState<"cards" | "table">("cards");
+
+  const [topic, setTopic] = useState(
+    "Eficácia e toxicidade de células CAR-T em tumores sólidos"
+  );
   const [currentStep, setCurrentStep] = useState<string>("SCREENING_CHECKPOINT");
   const [hitlPending, setHitlPending] = useState<boolean>(true);
-  const [checkpointType, setCheckpointType] = useState<"screening" | "bias_arbitration">("screening");
-  const [isHitlModalOpen, setIsHitlModalOpen] = useState<boolean>(false);
-  const [selectedBenchId, setSelectedBenchId] = useState<AgentBenchId | null>("hitl");
+  const [selectedBenchId, setSelectedBenchId] = useState<AgentBenchId>("hitl");
+
+  // Scientific State
+  const [pico, setPico] = useState<PicoData>(MOCK_PICO);
+  const [booleanQueries, setBooleanQueries] = useState<string[]>(
+    MOCK_BOOLEAN_QUERIES
+  );
   const [papers, setPapers] = useState<PaperItem[]>(MOCK_PAPERS);
-  const [prismaRows, setPrismaRows] = useState<PrismaMatrixItem[]>(MOCK_PRISMA_ROWS);
+  const [selectedPaperIds, setSelectedPaperIds] = useState<Set<string>>(
+    new Set(MOCK_PAPERS.map((p) => p.id))
+  );
+  const [prismaRows, setPrismaRows] =
+    useState<PrismaMatrixItem[]>(MOCK_PRISMA_ROWS);
+  const [knowledgeGaps, setKnowledgeGaps] =
+    useState<KnowledgeGapItem[]>(MOCK_GAPS);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [reviewId, setReviewId] = useState<string>("rev-01");
 
-  // Zustand Store & Real-time SSE Stream
   const { byok, setByokModalOpen, setReviewSession } = useLabStore();
   useAgentStream(reviewId);
 
-  const quickPills = [
-    "CAR-T Cell Therapy em Tumores Sólidos",
-    "CRISPR-Cas9 em Distrofia Muscular",
-    "Inteligência Artificial na Triagem de Oncologia",
-    "P-Hacking e Subamostragem em Preprints",
+  const quickExamples = [
+    "Eficácia da terapia celular CAR-T em tumores sólidos",
+    "Edição gênica CRISPR-Cas9 em Distrofia Muscular de Duchenne",
+    "Aprendizado Profundo no diagnóstico precoce de oncologia",
   ];
 
-  const handleLaunchReview = async (customQuery?: string) => {
+  const handleStartResearch = async (customQuery?: string) => {
     const queryToUse = customQuery || topic;
     setIsLoading(true);
     setCurrentStep("MINING");
     setHitlPending(false);
+    setSelectedBenchId("mining");
 
     try {
-      const res = await createReview(queryToUse);
+      const res = await createReview(queryToUse, {
+        byokGeminiKey: byok.geminiApiKey,
+        byokGroqKey: byok.groqApiKey,
+      });
+
       if (res) {
         const newRevId = res.review_id || "rev-01";
         setReviewId(newRevId);
-        setCurrentStep("SCREENING_CHECKPOINT");
-        setHitlPending(true);
-        setCheckpointType("screening");
-        if (res.papers && res.papers.length > 0) {
+        setCurrentStep(res.status || "SCREENING_CHECKPOINT");
+        setHitlPending(Boolean(res.hitl_pending));
+
+        if (res.pico) setPico(res.pico);
+        if (res.boolean_queries?.length) setBooleanQueries(res.boolean_queries);
+        if (res.papers?.length) {
           setPapers(res.papers);
+          setSelectedPaperIds(new Set(res.papers.map((p: PaperItem) => p.id)));
         }
+
+        setSelectedBenchId("hitl");
         setReviewSession({
           review_id: newRevId,
           query: queryToUse,
-          current_step: "SCREENING_CHECKPOINT",
-          hitl_pending: true,
+          current_step: res.status || "SCREENING_CHECKPOINT",
+          hitl_pending: Boolean(res.hitl_pending),
           raw_papers: res.papers || [],
         });
       }
+      setWizardStep(2);
     } finally {
       setIsLoading(false);
     }
   };
 
-  const handleConfirmHitl = (approvedIds: string[], rejectedIds: string[]) => {
-    setHitlPending(false);
-    setCurrentStep("COMPLETED");
+  const togglePaperSelection = (id: string) => {
+    const next = new Set(selectedPaperIds);
+    if (next.has(id)) {
+      next.delete(id);
+    } else {
+      next.add(id);
+    }
+    setSelectedPaperIds(next);
+  };
 
-    const remaining = papers.filter((p) => approvedIds.includes(p.id));
-    setPapers(remaining);
+  const handleApproveScreening = async () => {
+    const approvedIds = Array.from(selectedPaperIds);
+    const rejectedIds = papers
+      .map((p) => p.id)
+      .filter((id) => !selectedPaperIds.has(id));
+
+    setIsLoading(true);
+    setCurrentStep("AUDITING");
+    setSelectedBenchId("auditing");
+
+    try {
+      const res = await submitHitlDecision(
+        reviewId,
+        "screening",
+        approvedIds,
+        rejectedIds
+      );
+
+      if (res) {
+        setCurrentStep(res.status || "COMPLETED");
+        setHitlPending(false);
+        if (res.prisma_matrix?.length) setPrismaRows(res.prisma_matrix);
+        if (res.knowledge_gaps?.length) setKnowledgeGaps(res.knowledge_gaps);
+        setSelectedBenchId("synthesis");
+      }
+      setWizardStep(4);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const hasByokKeys = Boolean(byok.geminiApiKey || byok.groqApiKey);
 
-  // Stepper logic
-  const getStepNumber = () => {
-    if (currentStep === "PLANNING") return 1;
-    if (currentStep === "MINING" || currentStep === "SCREENING_CHECKPOINT") return 2;
-    if (currentStep === "AUDITING" || currentStep === "BIAS_ARBITRATION_CHECKPOINT") return 3;
-    if (currentStep === "SYNTHESIS" || currentStep === "COMPLETED") return 4;
-    return 2;
-  };
-  const activeStepNum = getStepNumber();
-
-  const steps = [
-    { num: 1, title: "Estruturação PICO" },
-    { num: 2, title: "Mineração de Artigos" },
-    { num: 3, title: "Auditoria Metodológica" },
-    { num: 4, title: "Síntese PRISMA" },
+  const navSteps: Array<{ num: WizardStep; label: string }> = [
+    { num: 1, label: "1. Sua Pergunta & PICO" },
+    { num: 2, label: "2. Laboratório Pixel Art" },
+    { num: 3, label: `3. Aprovar Artigos (${selectedPaperIds.size})` },
+    { num: 4, label: "4. Resultado PRISMA" },
   ];
 
+  // Didactic explanation for the currently clicked room in Step 2
+  const getBenchDidacticSummary = (bench: AgentBenchId) => {
+    switch (bench) {
+      case "coordinator":
+        return {
+          badge: "Sala 01 (1 Pesquisador) • Dr. Turing — PI Coordinator",
+          title: "Estrutura o protocolo PICO no quadro digital e entrega à Sala 02",
+          description: `População: ${pico.population} | Intervenção: ${pico.intervention}. Ao concluir, Dr. Turing caminha pelo corredor até a Sala 02 para entregar o protocolo à Dra. Ada.`,
+        };
+      case "mining":
+        return {
+          badge: "Sala 02 (2 Pesquisadores) • Dra. Ada (Busca) + Dr. Cross (Validação DOI)",
+          title: `Dupla divide a mineração (${papers.length} artigos) e a validação no servidor Crossref`,
+          description:
+            "Dra. Ada consulta OpenAlex e PubMed nos monitores duplos e passa os artigos brutos para o Dr. Cross ao lado do rack de servidores, que remove duplicatas, valida os DOIs e leva a pasta até a Sala 03 Central.",
+        };
+      case "auditing":
+        return {
+          badge: "Sala 04 (2 Pesquisadores) • Dr. Fitz (Extrator N) + Dra. Cochrane (RoB 2)",
+          title: "Dupla divide a extração estatística e o julgamento de Risco de Viés",
+          description:
+            "Dr. Fitz extrai tamanho amostral (N), grupo controle e p-valores na bancada frontal e entrega para a Dra. Cochrane na bancada superior, que classifica o estudo segundo o Cochrane RoB 2 e leva os laudos à Biblioteca.",
+        };
+      case "synthesis":
+        return {
+          badge: "Sala 05 (1 Pesquisadora) • Dra. Rosalind — Biblioteca & Síntese PRISMA",
+          title: `Consolida a Matriz PRISMA 2020 (${prismaRows.length} estudos) e ${knowledgeGaps.length} Knowledge Gaps`,
+          description:
+            "Recebe os laudos auditados da Dra. Cochrane, cruza referências Qualis/SJR nas estantes e gera as fichas comparativas e arquivos .CSV / .BibTeX.",
+        };
+      default:
+        return {
+          badge: "Sala 03 Central (1 Pesquisador) • Você — Supervisão Humana (HITL)",
+          title: `Recebe a pasta do Dr. Cross e decide quais dos ${papers.length} artigos seguem adiante`,
+          description:
+            "Após aprovar os estudos elegíveis, seu avatar leva a pasta aprovada até o Dr. Fitz no Laboratório de Auditoria (Sala 04).",
+        };
+    }
+  };
+
+  const activeBenchInfo = getBenchDidacticSummary(selectedBenchId);
+
   return (
-    <div className="min-h-screen bg-[#F8FAFC] text-slate-800 flex flex-col font-sans selection:bg-blue-100 selection:text-blue-900">
-      {/* Clean Top Navbar */}
-      <header className="sticky top-0 z-40 w-full border-b border-slate-200/90 bg-white/90 backdrop-blur-md">
-        <div className="max-w-[1720px] mx-auto px-6 h-16 flex items-center justify-between gap-4">
-          {/* Logo and Brand */}
-          <div className="flex items-center gap-3 shrink-0">
-            <div className="p-2 rounded-xl bg-blue-600 text-white shadow-sm">
-              <BookOpen size={18} />
+    <div className="min-h-screen bg-[#FAF9F6] text-slate-900 flex flex-col">
+      {/* Clean Minimalist Header with Stepper */}
+      <header className="sticky top-0 z-40 bg-white/95 backdrop-blur-md border-b border-slate-200 px-6 lg:px-10 py-4">
+        <div className="max-w-6xl mx-auto flex flex-wrap items-center justify-between gap-4">
+          {/* Logo */}
+          <button
+            onClick={() => setWizardStep(1)}
+            className="flex items-center gap-3 text-left cursor-pointer"
+          >
+            <div className="w-10 h-10 rounded-xl bg-slate-900 text-white flex items-center justify-center shadow-sm">
+              <BookOpen size={20} />
             </div>
             <div>
-              <div className="flex items-center gap-2">
-                <span className="font-bold text-base tracking-tight text-slate-900">
-                  CortexLab
-                </span>
-                <span className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 border border-slate-200">
-                  Revisão Científica
-                </span>
-              </div>
-              <p className="text-[10px] text-slate-500 font-medium hidden sm:block">
-                Assistência Multi-Agente & Human Augmentation
-              </p>
+              <span className="text-xl font-extrabold tracking-tight text-slate-900 block leading-none">
+                CortexLab
+              </span>
+              <span className="text-xs font-medium text-slate-500">
+                Revisão Sistemática PRISMA 2020
+              </span>
             </div>
-          </div>
+          </button>
 
-          {/* Stepper Horizontal Limpo */}
-          <nav className="hidden lg:flex items-center gap-1.5 p-1 rounded-xl bg-slate-100 border border-slate-200/80">
-            {steps.map((st, idx) => {
-              const isPast = activeStepNum > st.num;
-              const isCurrent = activeStepNum === st.num;
-
+          {/* 4-Step Guided Navigation Pills */}
+          <nav className="flex flex-wrap items-center gap-2">
+            {navSteps.map((st, idx) => {
+              const isActive = wizardStep === st.num;
+              const isDone = wizardStep > st.num;
               return (
                 <React.Fragment key={st.num}>
-                  <div
-                    className={`flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-medium transition ${
-                      isCurrent
-                        ? "bg-white text-blue-700 shadow-sm font-semibold"
-                        : isPast
-                        ? "text-slate-700"
-                        : "text-slate-400"
+                  <button
+                    onClick={() => setWizardStep(st.num)}
+                    className={`px-4 py-2 rounded-full text-sm font-semibold transition cursor-pointer flex items-center gap-1.5 ${
+                      isActive
+                        ? "bg-slate-900 text-white shadow-sm"
+                        : isDone
+                        ? "bg-emerald-50 text-emerald-800 border border-emerald-200 hover:bg-emerald-100"
+                        : "bg-slate-100 text-slate-600 hover:bg-slate-200"
                     }`}
                   >
-                    {isPast ? (
-                      <CheckCircle2 size={13} className="text-emerald-600" />
-                    ) : (
-                      <span
-                        className={`w-4 h-4 rounded-full flex items-center justify-center text-[10px] ${
-                          isCurrent
-                            ? "bg-blue-600 text-white"
-                            : "bg-slate-200 text-slate-600"
-                        }`}
-                      >
-                        {st.num}
-                      </span>
+                    {isDone && (
+                      <CheckCircle2 size={15} className="text-emerald-600" />
                     )}
-                    <span>{st.title}</span>
-                  </div>
-                  {idx < steps.length - 1 && (
-                    <ChevronRight size={12} className="text-slate-400" />
+                    <span>{st.label}</span>
+                  </button>
+                  {idx < navSteps.length - 1 && (
+                    <span className="text-slate-300 hidden md:inline">→</span>
                   )}
                 </React.Fragment>
               );
             })}
           </nav>
 
-          {/* Right Action Buttons */}
-          <div className="flex items-center gap-2.5 shrink-0">
+          {/* Right Utilities */}
+          <div className="flex items-center gap-2.5">
             <button
               onClick={() => setByokModalOpen(true)}
-              className={`px-3 py-1.5 rounded-xl border text-xs font-medium flex items-center gap-1.5 transition cursor-pointer ${
+              className={`px-4 py-2 rounded-xl border text-sm font-semibold flex items-center gap-2 transition cursor-pointer ${
                 hasByokKeys
-                  ? "bg-emerald-50 border-emerald-200 text-emerald-700 hover:bg-emerald-100"
-                  : "bg-white border-slate-200 hover:bg-slate-50 text-slate-700 shadow-sm"
+                  ? "bg-emerald-50 border-emerald-200 text-emerald-800"
+                  : "bg-white border-slate-300 text-slate-700 hover:bg-slate-50"
               }`}
             >
-              <Key size={13} className={hasByokKeys ? "text-emerald-600" : "text-slate-500"} />
-              <span>
-                {hasByokKeys ? "Chaves de IA Ativas" : "Chaves de IA (Grátis)"}
-              </span>
+              <Key size={15} />
+              <span>{hasByokKeys ? "Chave IA Ativa" : "Chave IA"}</span>
             </button>
 
             <a
               href="https://github.com/samucabsb/cortex-lab"
               target="_blank"
               rel="noreferrer"
-              className="p-2 rounded-xl bg-white border border-slate-200 hover:border-slate-300 text-slate-500 hover:text-slate-800 transition shadow-sm"
-              title="Código Fonte no GitHub"
+              className="p-2.5 rounded-xl bg-white border border-slate-300 text-slate-600 hover:text-slate-900 transition"
+              title="Repositório no GitHub"
             >
-              <Github size={16} />
+              <Github size={18} />
             </a>
           </div>
         </div>
       </header>
 
-      {/* Main Split-Screen Workspace */}
-      <main className="flex-1 max-w-[1720px] mx-auto w-full px-6 py-6">
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-          {/* Lado Esquerdo (Fixo / Sticky no Desktop): Diorama do Laboratório */}
-          <section className="lg:col-span-5 xl:col-span-5 lg:sticky lg:top-24 space-y-4">
-            <div className="flex items-center justify-between pb-1">
-              <div>
-                <h2 className="text-sm font-semibold text-slate-900 flex items-center gap-2">
-                  <span>Maquete do Laboratório de Pesquisa</span>
-                  <span className="text-[11px] font-normal px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 border border-blue-200">
-                    Bancadas Ativas
-                  </span>
-                </h2>
-                <p className="text-xs text-slate-500">
-                  Clique nas estações de trabalho para inspecionar os agentes
-                </p>
-              </div>
-
-              {hitlPending && (
-                <button
-                  onClick={() => setIsHitlModalOpen(true)}
-                  className="px-3 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-white text-xs font-medium shadow-sm transition active:scale-95 flex items-center gap-1.5"
-                >
-                  <FileCheck2 size={13} />
-                  <span>Validar Triagem</span>
-                </button>
-              )}
-            </div>
-
-            {/* Canvas Isométrico em Estilo Maquete Arquitetônica Iluminada */}
-            <IsometricLabCanvas
-              currentStep={currentStep}
-              hitlPending={hitlPending}
-              onSelectBench={(benchId) => {
-                setSelectedBenchId(benchId);
-                if (benchId === "hitl") {
-                  setIsHitlModalOpen(true);
-                }
-              }}
-              selectedBenchId={selectedBenchId}
-              onOpenHitl={() => setIsHitlModalOpen(true)}
-            />
-
-            {/* Card com Resumo do Protocolo Ativo */}
-            <div className="p-4 rounded-xl bg-white border border-slate-200 shadow-sm flex items-center justify-between text-xs text-slate-600">
-              <div className="flex items-center gap-2">
-                <span className="w-2 h-2 rounded-full bg-emerald-500" />
-                <span>
-                  Bases Integradas: <strong>OpenAlex</strong>, <strong>PubMed</strong>, <strong>SciELO</strong> e <strong>Europe PMC</strong>
-                </span>
-              </div>
-              <span className="text-[11px] text-slate-400 font-mono">
-                Sessão #{reviewId}
+      {/* Single Focused Workspace Container */}
+      <main className="flex-1 max-w-5xl w-full mx-auto px-6 py-10">
+        {/* =========================================================
+            STEP 1: SUA PERGUNTA & PROTOCOLO EDITORIAL PICO
+           ========================================================= */}
+        {wizardStep === 1 && (
+          <section className="space-y-10">
+            <div className="text-center space-y-4 max-w-3xl mx-auto pt-2">
+              <span className="inline-block px-4 py-1.5 rounded-full bg-blue-100 text-blue-800 font-semibold text-sm">
+                Etapa 1 de 4 • Definição da Pesquisa Científica
               </span>
+              <h1 className="serif-title text-4xl md:text-5xl font-bold text-slate-900 leading-tight">
+                O que você quer investigar hoje?
+              </h1>
+              <p className="text-lg text-slate-600 leading-relaxed">
+                Digite seu tema de pesquisa. Os agentes estruturam o protocolo{" "}
+                <strong>PICO</strong>, buscam artigos reais na{" "}
+                <strong>OpenAlex e PubMed</strong> e auditam o risco de viés.
+              </p>
             </div>
-          </section>
 
-          {/* Lado Direito (Scroll Suave): O Caderno de Pesquisa Científico */}
-          <section className="lg:col-span-7 xl:col-span-7 space-y-6">
-            {/* Caixa de Pergunta de Pesquisa & Acionamento */}
-            <div className="p-5 rounded-2xl bg-white border border-slate-200 shadow-sm space-y-3">
-              <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5">
-                <div className="relative flex-1">
-                  <Search className="absolute left-3.5 top-3 text-slate-400" size={16} />
-                  <input
-                    type="text"
-                    value={topic}
-                    onChange={(e) => setTopic(e.target.value)}
-                    placeholder="Qual é a sua pergunta de pesquisa ou tema de revisão? (ex: Eficácia da terapia celular CAR-T)..."
-                    className="w-full pl-10 pr-4 py-2.5 rounded-xl bg-slate-50 border border-slate-200 text-xs text-slate-900 placeholder-slate-400 focus:outline-none focus:border-blue-500 focus:bg-white transition"
-                  />
-                </div>
+            {/* Large Search Box */}
+            <div className="bg-white p-4 rounded-3xl shadow-md border border-slate-200 max-w-3xl mx-auto flex flex-col sm:flex-row gap-3">
+              <input
+                type="text"
+                value={topic}
+                onChange={(e) => setTopic(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && handleStartResearch()}
+                placeholder="Ex: Eficácia da terapia celular CAR-T em tumores sólidos..."
+                className="flex-1 px-5 py-4 text-lg text-slate-900 bg-slate-50 rounded-2xl border border-slate-200 focus:outline-none focus:border-blue-600 focus:bg-white transition"
+              />
+              <button
+                onClick={() => handleStartResearch()}
+                disabled={isLoading}
+                className="px-8 py-4 rounded-2xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-lg shadow-sm transition flex items-center justify-center gap-2 shrink-0 cursor-pointer disabled:opacity-50"
+              >
+                <Sparkles size={18} />
+                <span>
+                  {isLoading ? "Consultando Bases..." : "Iniciar Pesquisa →"}
+                </span>
+              </button>
+            </div>
 
-                <button
-                  onClick={() => handleLaunchReview()}
-                  disabled={isLoading}
-                  className="px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-medium text-xs shadow-sm transition active:scale-95 flex items-center justify-center gap-2 disabled:opacity-50 shrink-0 cursor-pointer"
-                >
-                  <Sparkles size={14} />
-                  <span>{isLoading ? "Consultando Bases..." : "Iniciar Revisão Científica"}</span>
-                </button>
-              </div>
-
-              {/* Sugestões Rápidas de Temas */}
-              <div className="flex flex-wrap items-center gap-1.5 pt-1 text-xs">
-                <span className="text-slate-400 text-[11px] font-medium">Sugestões:</span>
-                {quickPills.map((pill) => (
+            {/* Quick Example Pills */}
+            <div className="text-center space-y-2.5">
+              <p className="text-sm text-slate-500 font-medium">
+                Ou teste imediatamente com um exemplo:
+              </p>
+              <div className="flex flex-wrap justify-center gap-2.5">
+                {quickExamples.map((ex) => (
                   <button
-                    key={pill}
+                    key={ex}
                     onClick={() => {
-                      setTopic(pill);
-                      handleLaunchReview(pill);
+                      setTopic(ex);
+                      handleStartResearch(ex);
                     }}
-                    className="px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 border border-slate-200 text-slate-600 hover:text-slate-900 text-[11px] transition cursor-pointer"
+                    className="px-4 py-2 rounded-full bg-white border border-slate-200 hover:border-slate-400 text-slate-700 text-sm font-medium transition cursor-pointer shadow-sm"
                   >
-                    {pill}
+                    {ex}
                   </button>
                 ))}
               </div>
             </div>
 
-            {/* Barra de Exportação e Metadados da Matriz */}
-            <div className="flex flex-wrap items-center justify-between gap-3 bg-white p-3.5 rounded-xl border border-slate-200 shadow-sm">
+            {/* Editorial PICO Summary Card (From Proposal 2) */}
+            <div className="bg-white p-8 rounded-3xl border border-slate-200 shadow-sm space-y-6">
+              <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-100 pb-4">
+                <div>
+                  <span className="text-xs font-bold uppercase tracking-wider text-emerald-700">
+                    Protocolo Metodológico Atual
+                  </span>
+                  <h2 className="serif-title text-2xl font-bold text-slate-900 mt-0.5">
+                    Decomposição PICO & Estratégia de Busca
+                  </h2>
+                </div>
+                <button
+                  onClick={() => setWizardStep(2)}
+                  className="px-5 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-semibold text-sm flex items-center gap-2 cursor-pointer transition"
+                >
+                  <span>Ver Laboratório Pixel Art HD-2D</span>
+                  <ArrowRight size={16} />
+                </button>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="p-5 rounded-2xl bg-slate-50 border border-slate-200/80">
+                  <div className="text-xs font-bold text-emerald-800 uppercase tracking-wider">
+                    População (P)
+                  </div>
+                  <div className="text-base text-slate-900 font-medium mt-1 leading-snug">
+                    {pico.population}
+                  </div>
+                </div>
+                <div className="p-5 rounded-2xl bg-slate-50 border border-slate-200/80">
+                  <div className="text-xs font-bold text-emerald-800 uppercase tracking-wider">
+                    Intervenção (I)
+                  </div>
+                  <div className="text-base text-slate-900 font-medium mt-1 leading-snug">
+                    {pico.intervention}
+                  </div>
+                </div>
+                <div className="p-5 rounded-2xl bg-slate-50 border border-slate-200/80">
+                  <div className="text-xs font-bold text-emerald-800 uppercase tracking-wider">
+                    Comparador (C)
+                  </div>
+                  <div className="text-base text-slate-900 font-medium mt-1 leading-snug">
+                    {pico.comparator}
+                  </div>
+                </div>
+                <div className="p-5 rounded-2xl bg-slate-50 border border-slate-200/80">
+                  <div className="text-xs font-bold text-emerald-800 uppercase tracking-wider">
+                    Desfechos (O)
+                  </div>
+                  <div className="text-base text-slate-900 font-medium mt-1 leading-snug">
+                    {pico.outcome}
+                  </div>
+                </div>
+              </div>
+
+              <div className="pt-1 space-y-2">
+                <div className="text-xs font-bold uppercase tracking-wider text-slate-400">
+                  Query Booleana Principal (OpenAlex / PubMed)
+                </div>
+                <div className="p-3.5 rounded-xl bg-slate-900 text-slate-100 font-mono text-sm overflow-x-auto">
+                  {booleanQueries[0]}
+                </div>
+              </div>
+            </div>
+          </section>
+        )}
+
+        {/* =========================================================
+            STEP 2: LABORATÓRIO PIXEL ART HD-2D AMPLO & DIDÁTICO
+           ========================================================= */}
+        {wizardStep === 2 && (
+          <section className="space-y-6">
+            <div className="flex flex-wrap items-center justify-between gap-4">
               <div>
-                <h3 className="text-xs font-semibold text-slate-800">
-                  Caderno de Extração & Síntese Sistemática
+                <span className="text-sm font-bold text-blue-600 uppercase">
+                  Etapa 2 de 4 • O Trabalho dos Agentes em Tempo Real
+                </span>
+                <h2 className="serif-title text-3xl font-bold text-slate-900 mt-0.5">
+                  Laboratório Científico Pixel Art HD-2D
+                </h2>
+              </div>
+
+              <button
+                onClick={() => setWizardStep(3)}
+                className="px-6 py-3.5 rounded-2xl bg-amber-500 hover:bg-amber-600 text-white font-bold text-base shadow-md transition flex items-center gap-2 cursor-pointer"
+              >
+                <span>
+                  Avançar para Aprovar Artigos ({papers.length} encontrados)
+                </span>
+                <ArrowRight size={18} />
+              </button>
+            </div>
+
+            {/* Full-Width WebGL 3D Scene */}
+            <IsometricLabCanvas
+              currentStep={currentStep}
+              hitlPending={hitlPending}
+              selectedBenchId={selectedBenchId}
+              onSelectBench={(benchId) => setSelectedBenchId(benchId)}
+              onOpenHitl={() => setWizardStep(3)}
+            />
+
+            {/* Single Clean Didactic Explanation Banner Below the 3D Scene */}
+            <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm flex flex-col md:flex-row items-start md:items-center justify-between gap-6">
+              <div className="space-y-1.5">
+                <span className="text-xs font-bold uppercase tracking-wider text-blue-700">
+                  {activeBenchInfo.badge}
+                </span>
+                <h3 className="text-xl font-bold text-slate-900">
+                  {activeBenchInfo.title}
                 </h3>
-                <p className="text-[11px] text-slate-500">
-                  Metodologia compatível com PRISMA 2020 e citação auditada
+                <p className="text-base text-slate-600 leading-relaxed">
+                  {activeBenchInfo.description}
+                </p>
+              </div>
+
+              <button
+                onClick={() => setWizardStep(3)}
+                className="px-6 py-3.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-semibold text-base shrink-0 cursor-pointer transition"
+              >
+                Revisar os {papers.length} Artigos →
+              </button>
+            </div>
+          </section>
+        )}
+
+        {/* =========================================================
+            STEP 3: TRIAGEM HUMANA (HITL) — CARDS GRANDES E CLAROS
+           ========================================================= */}
+        {wizardStep === 3 && (
+          <section className="space-y-8">
+            <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-200 pb-6">
+              <div>
+                <span className="text-sm font-bold text-amber-600 uppercase">
+                  Etapa 3 de 4 • Sua Decisão Soberana (Human-in-the-Loop)
+                </span>
+                <h2 className="serif-title text-3xl font-bold text-slate-900 mt-1">
+                  Quais artigos devem entrar na sua revisão?
+                </h2>
+                <p className="text-base text-slate-600 mt-1">
+                  Desmarque qualquer artigo fora do escopo antes de o Agente Metodologista auditar o risco de viés.
+                </p>
+              </div>
+
+              <button
+                onClick={handleApproveScreening}
+                disabled={isLoading || selectedPaperIds.size === 0}
+                className="px-7 py-4 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-base shadow-md transition flex items-center gap-2 cursor-pointer disabled:opacity-50"
+              >
+                <CheckCircle2 size={18} />
+                <span>
+                  {isLoading
+                    ? "Auditando Artigos..."
+                    : `Confirmar ${selectedPaperIds.size} Artigos e Gerar Matriz →`}
+                </span>
+              </button>
+            </div>
+
+            {/* Selection Controls */}
+            <div className="flex items-center justify-between text-sm text-slate-600">
+              <span className="font-semibold">
+                {selectedPaperIds.size} de {papers.length} estudos selecionados para inclusão
+              </span>
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={() =>
+                    setSelectedPaperIds(new Set(papers.map((p) => p.id)))
+                  }
+                  className="text-blue-600 hover:underline font-semibold cursor-pointer"
+                >
+                  Marcar Todos
+                </button>
+                <span>•</span>
+                <button
+                  onClick={() => setSelectedPaperIds(new Set())}
+                  className="text-slate-500 hover:underline font-medium cursor-pointer"
+                >
+                  Desmarcar Todos
+                </button>
+              </div>
+            </div>
+
+            {/* Large Selectable Article Cards */}
+            <div className="space-y-4">
+              {papers.map((paper) => {
+                const isSelected = selectedPaperIds.has(paper.id);
+                return (
+                  <div
+                    key={paper.id}
+                    onClick={() => togglePaperSelection(paper.id)}
+                    className={`p-6 rounded-2xl bg-white border-2 transition cursor-pointer ${
+                      isSelected
+                        ? "border-blue-600 shadow-sm"
+                        : "border-slate-200 opacity-60 hover:opacity-90"
+                    }`}
+                  >
+                    <div className="flex items-start gap-4">
+                      <input
+                        type="checkbox"
+                        checked={isSelected}
+                        onChange={() => {}}
+                        className="w-5 h-5 mt-1.5 accent-blue-600 cursor-pointer shrink-0"
+                      />
+                      <div className="space-y-2 flex-1">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <div className="flex flex-wrap items-center gap-2.5">
+                            <span className="px-3 py-1 rounded-lg bg-blue-50 text-blue-800 font-semibold text-xs border border-blue-200">
+                              {paper.journal || "Periódico Científico"} •{" "}
+                              {paper.year || 2024}
+                            </span>
+                            <span className="px-2.5 py-0.5 rounded-md bg-slate-100 text-slate-600 text-xs font-medium">
+                              Fonte: {paper.source_api}
+                            </span>
+                          </div>
+
+                          {paper.doi && (
+                            <a
+                              href={`https://doi.org/${paper.doi}`}
+                              target="_blank"
+                              rel="noreferrer"
+                              onClick={(e) => e.stopPropagation()}
+                              className="text-xs font-mono text-blue-600 hover:underline inline-flex items-center gap-1"
+                            >
+                              <span>DOI: {paper.doi}</span>
+                              <ExternalLink size={12} />
+                            </a>
+                          )}
+                        </div>
+
+                        <h3 className="text-xl font-bold text-slate-900 leading-snug">
+                          {paper.title}
+                        </h3>
+
+                        <div className="text-sm text-slate-500 font-medium">
+                          Autores: {paper.authors.join(", ")}
+                        </div>
+
+                        {paper.abstract && (
+                          <p className="text-base text-slate-600 leading-relaxed pt-1">
+                            {paper.abstract}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </section>
+        )}
+
+        {/* =========================================================
+            STEP 4: RESULTADO FINAL (CADERNO PRISMA 2020 & LACUNAS)
+           ========================================================= */}
+        {wizardStep === 4 && (
+          <section className="space-y-12">
+            {/* Top Editorial Header & Export Bar */}
+            <div className="flex flex-wrap items-end justify-between gap-4 border-b border-slate-200 pb-6">
+              <div>
+                <span className="text-sm font-bold text-emerald-700 uppercase">
+                  Etapa 4 de 4 • Revisão Sistemática Concluída
+                </span>
+                <h2 className="serif-title text-3xl md:text-4xl font-bold text-slate-900 mt-1">
+                  Caderno de Síntese PRISMA 2020 & RoB 2
+                </h2>
+                <p className="text-base text-slate-600 mt-1">
+                  {prismaRows.length} estudos auditados com extração de amostra (N), desfechos e citações literais rastreáveis.
                 </p>
               </div>
 
               <ExportToolbar reviewId={reviewId} />
             </div>
 
-            {/* Lacunas de Conhecimento Científico */}
-            <KnowledgeGapsCard gaps={MOCK_GAPS} />
-
-            {/* Tabela Comparativa de Artigos (PRISMA) */}
-            <div className="space-y-2">
-              <div className="flex items-center justify-between px-1">
-                <h3 className="text-xs font-semibold text-slate-800 uppercase tracking-wider">
-                  Matriz Comparativa de Artigos Incluídos
+            {/* View Mode Toggle: Detailed Study Cards (Proposal 1) vs Clean Editorial Table (Proposal 2) */}
+            <div className="space-y-5">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <h3 className="serif-title text-2xl font-bold text-slate-900">
+                  Estudos Incluídos e Auditados
                 </h3>
-                <span className="text-[11px] text-slate-500">
-                  {prismaRows.length} estudos sintetizados com citação rastreável
-                </span>
+
+                <div className="inline-flex items-center bg-slate-200/70 p-1 rounded-xl">
+                  <button
+                    onClick={() => setResultViewMode("cards")}
+                    className={`px-3.5 py-1.5 rounded-lg text-sm font-semibold flex items-center gap-2 transition cursor-pointer ${
+                      resultViewMode === "cards"
+                        ? "bg-white text-slate-900 shadow-sm"
+                        : "text-slate-600 hover:text-slate-900"
+                    }`}
+                  >
+                    <LayoutGrid size={15} />
+                    <span>Fichas Detalhadas</span>
+                  </button>
+                  <button
+                    onClick={() => setResultViewMode("table")}
+                    className={`px-3.5 py-1.5 rounded-lg text-sm font-semibold flex items-center gap-2 transition cursor-pointer ${
+                      resultViewMode === "table"
+                        ? "bg-white text-slate-900 shadow-sm"
+                        : "text-slate-600 hover:text-slate-900"
+                    }`}
+                  >
+                    <Table2 size={15} />
+                    <span>Tabela Comparativa</span>
+                  </button>
+                </div>
               </div>
-              <PrismaMatrixTable rows={prismaRows} />
+
+              {resultViewMode === "cards" ? (
+                <div className="space-y-5">
+                  {prismaRows.map((row) => (
+                    <div
+                      key={row.paper_id}
+                      className="bg-white p-7 rounded-3xl border border-slate-200 shadow-sm space-y-5"
+                    >
+                      <div className="flex flex-wrap items-center justify-between gap-3">
+                        <div className="flex flex-wrap items-center gap-3">
+                          <span className="text-xl font-extrabold text-blue-700">
+                            {row.citation_key}
+                          </span>
+                          <span className="px-3 py-1 rounded-full bg-slate-100 text-slate-700 font-semibold text-xs border border-slate-200">
+                            {row.journal || "Periódico"} • Qualis{" "}
+                            {row.qualis_capes || "A1"} ({row.sjr_quartile || "Q1"})
+                          </span>
+                          <a
+                            href={`https://doi.org/${row.doi}`}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="text-xs font-mono text-slate-500 hover:text-blue-600 inline-flex items-center gap-1"
+                          >
+                            <span>DOI: {row.doi}</span>
+                            <ExternalLink size={12} />
+                          </a>
+                        </div>
+
+                        {row.risk_of_bias === "LOW" ? (
+                          <span className="px-4 py-1.5 rounded-full bg-emerald-50 text-emerald-800 border border-emerald-200 font-bold text-xs inline-flex items-center gap-1.5">
+                            <CheckCircle2 size={14} className="text-emerald-600" />
+                            Baixo Risco de Viés (RoB 2)
+                          </span>
+                        ) : row.risk_of_bias === "HIGH" ? (
+                          <span className="px-4 py-1.5 rounded-full bg-rose-50 text-rose-800 border border-rose-200 font-bold text-xs inline-flex items-center gap-1.5">
+                            <AlertCircle size={14} className="text-rose-600" />
+                            Alto Risco de Viés (RoB 2)
+                          </span>
+                        ) : (
+                          <span className="px-4 py-1.5 rounded-full bg-amber-50 text-amber-800 border border-amber-200 font-bold text-xs inline-flex items-center gap-1.5">
+                            <AlertCircle size={14} className="text-amber-600" />
+                            Algumas Preocupações (RoB 2)
+                          </span>
+                        )}
+                      </div>
+
+                      <h4 className="text-xl font-bold text-slate-900 leading-snug">
+                        {row.title}
+                      </h4>
+
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200/70">
+                          <div className="text-xs font-bold uppercase text-slate-500">
+                            Amostra (População)
+                          </div>
+                          <div className="text-lg font-bold text-slate-900 mt-1">
+                            {row.population_n || "N/A"}
+                          </div>
+                        </div>
+                        <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200/70">
+                          <div className="text-xs font-bold uppercase text-slate-500">
+                            Intervenção & Controle
+                          </div>
+                          <div className="text-sm font-semibold text-slate-900 mt-1 leading-snug">
+                            {row.intervention} vs. {row.comparator}
+                          </div>
+                        </div>
+                        <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200/70">
+                          <div className="text-xs font-bold uppercase text-slate-500">
+                            Desfecho Estatístico
+                          </div>
+                          <div className="text-sm font-semibold text-emerald-800 mt-1 leading-snug">
+                            {row.outcomes}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="p-4 rounded-2xl bg-blue-50/50 border border-blue-100 flex items-start gap-3 text-sm text-slate-700 italic">
+                        <Quote
+                          size={16}
+                          className="text-blue-600 shrink-0 mt-0.5"
+                        />
+                        <div>
+                          <strong className="not-italic text-slate-900">
+                            Trecho Original Rastreado (p. {row.page_reference || 1}):{" "}
+                          </strong>
+                          {row.traceable_quote}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <PrismaMatrixTable rows={prismaRows} />
+              )}
             </div>
+
+            {/* Knowledge Gaps Section */}
+            <KnowledgeGapsCard gaps={knowledgeGaps} />
           </section>
-        </div>
+        )}
       </main>
 
-      {/* Modal de Validação Soberana Humana (Human-in-the-Loop) */}
-      <HumanApprovalModal
-        isOpen={isHitlModalOpen}
-        onClose={() => setIsHitlModalOpen(false)}
-        checkpointType={checkpointType}
-        papers={papers}
-        onConfirmApproval={handleConfirmHitl}
-      />
-
-      {/* Modal de Configuração de Chaves Próprias (BYOK) */}
+      {/* BYOK Free API Keys Configuration Modal */}
       <ByokConfigModal />
     </div>
   );

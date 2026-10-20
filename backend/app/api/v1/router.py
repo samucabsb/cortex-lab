@@ -41,6 +41,8 @@ async def create_review(payload: CreateReviewRequest):
         "topic": payload.topic,
         "inclusion_criteria": payload.inclusion_criteria,
         "exclusion_criteria": payload.exclusion_criteria,
+        "byok_gemini_key": payload.byok_gemini_key,
+        "byok_groq_key": payload.byok_groq_key,
         "active_agent": "coordinator",
         "current_bench": "bench_coordinator",
         "agent_statuses": {
@@ -117,10 +119,9 @@ async def submit_hitl_decision(review_id: str, decision: HITLDecisionRequest):
     state = REVIEWS_DATABASE[review_id]
 
     if decision.step_checkpoint == "screening":
-        if decision.rejected_paper_ids:
-            for p in state.get("raw_papers", []):
-                if p["id"] in decision.rejected_paper_ids:
-                    p["is_screened_in"] = False
+        rejected_set = set(decision.rejected_paper_ids or [])
+        for p in state.get("raw_papers", []):
+            p["is_screened_in"] = p["id"] not in rejected_set
 
         # 1. Human node
         screened_res = human_screening_node(state)
@@ -130,10 +131,9 @@ async def submit_hitl_decision(review_id: str, decision: HITLDecisionRequest):
         audit_res = await methodologist_node(state)
         state.update(audit_res)
 
-        # If methodologist requires bias arbitration, stop and await researcher confirmation
-        if not state.get("hitl_pending"):
-            synth_res = await synthesizer_node(state)
-            state.update(synth_res)
+        # 3. Synthesizer node (Always generate PRISMA matrix & Knowledge Gaps for immediate inspection)
+        synth_res = await synthesizer_node(state)
+        state.update(synth_res)
 
         REVIEWS_DATABASE[review_id] = state
 
@@ -144,9 +144,10 @@ async def submit_hitl_decision(review_id: str, decision: HITLDecisionRequest):
         return {
             "review_id": review_id,
             "status": state["current_step"],
-            "hitl_pending": state["hitl_pending"],
-            "hitl_checkpoint": state.get("hitl_checkpoint"),
+            "hitl_pending": False,
+            "hitl_checkpoint": None,
             "message": state["status_message"],
+            "audited_papers": state.get("audited_papers", []),
             "matrix_rows": len(state.get("prisma_matrix", [])),
             "prisma_matrix": state.get("prisma_matrix", []),
             "knowledge_gaps": state.get("knowledge_gaps", []),
@@ -181,7 +182,7 @@ async def submit_hitl_decision(review_id: str, decision: HITLDecisionRequest):
 async def stream_review_events(review_id: str):
     """Server-Sent Events endpoint streaming real-time status of agent benches."""
     async def event_generator():
-        for i in range(15):
+        for _ in range(15):
             await asyncio.sleep(2)
             state = REVIEWS_DATABASE.get(review_id, {})
             current_step = state.get("current_step", "MINING")
@@ -197,6 +198,8 @@ async def stream_review_events(review_id: str):
                 "message": state.get("status_message", "Agentes processando em bancadas..."),
             }
             yield f"data: {json.dumps(payload)}\n\n"
+            if current_step == "COMPLETED":
+                break
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
 

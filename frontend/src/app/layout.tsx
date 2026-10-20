@@ -2,9 +2,9 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "CortexLab — Human Augmentation in Scientific Research | Multi-Agent Platform",
+  title: "CortexLab — Revisão Sistemática & Human Augmentation | Laboratório Multi-Agente 3D",
   description:
-    "Plataforma multi-agente para aumento de desempenho humano na pesquisa científica. Mineração federada em APIs abertas, auditoria metodológica e síntese PRISMA com zero alucinação.",
+    "Plataforma acadêmica multi-agente para amplificação cognitiva na pesquisa científica. Laboratório espacial 3D, mineração federada OpenAlex/PubMed, auditoria RoB 2 e síntese PRISMA 2020.",
   keywords: [
     "Human Augmentation",
     "Scientific Research",
@@ -24,8 +24,8 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="pt-BR" className="dark">
-      <body className="bg-slate-950 text-slate-100 min-h-screen selection:bg-cyan-500 selection:text-slate-950 antialiased">
+    <html lang="pt-BR">
+      <body className="bg-[#F8FAFC] text-slate-900 min-h-screen selection:bg-blue-100 selection:text-blue-900 antialiased">
         {children}
       </body>
     </html>

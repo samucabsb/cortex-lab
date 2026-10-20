@@ -25,7 +25,7 @@ CREATE TABLE IF NOT EXISTS projects (
 -- 3. Mined & Screened Academic Papers Table
 CREATE TABLE IF NOT EXISTS papers (
     id VARCHAR(128) PRIMARY KEY,
-    project_id UUID REFERENCES projects(id) ON DELETE CASCADE,
+    project_id VARCHAR(64) REFERENCES projects(review_id) ON DELETE CASCADE,
     doi VARCHAR(256),
     title TEXT NOT NULL,
     authors JSONB DEFAULT '[]'::jsonb,
@@ -48,7 +48,7 @@ CREATE INDEX IF NOT EXISTS idx_papers_doi ON papers(doi);
 -- 4. PRISMA Systematic Review Matrix Rows
 CREATE TABLE IF NOT EXISTS prisma_rows (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    project_id UUID REFERENCES projects(id) ON DELETE CASCADE,
+    project_id VARCHAR(64) REFERENCES projects(review_id) ON DELETE CASCADE,
     paper_id VARCHAR(128),
     citation_key VARCHAR(128) NOT NULL,
     doi VARCHAR(256) NOT NULL,
@@ -72,7 +72,7 @@ CREATE INDEX IF NOT EXISTS idx_prisma_doi ON prisma_rows(doi);
 -- 5. Multi-Agent Lab Telemetry & Audit Logs
 CREATE TABLE IF NOT EXISTS agent_events (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    project_id UUID REFERENCES projects(id) ON DELETE CASCADE,
+    project_id VARCHAR(64) REFERENCES projects(review_id) ON DELETE CASCADE,
     agent_id VARCHAR(64) NOT NULL, -- 'coordinator' | 'miner' | 'methodologist' | 'synthesizer'
     bench_id VARCHAR(64) NOT NULL, -- 'bench_coordinator' | 'bench_mining' | 'bench_auditing' | 'bench_synthesis' | 'bench_hitl'
     step VARCHAR(64) NOT NULL,

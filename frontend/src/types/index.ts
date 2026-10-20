@@ -1,13 +1,20 @@
-export type AgentBenchId = 'mining' | 'parsing' | 'auditing' | 'synthesis' | 'hitl';
+export type AgentBenchId = 'coordinator' | 'mining' | 'parsing' | 'auditing' | 'synthesis' | 'hitl';
 
-export type AgentStateStatus = 
-  | 'IDLE' 
-  | 'WORKING' 
-  | 'WAITING_APPROVAL' 
-  | 'COMPLETED' 
+export type AgentStateStatus =
+  | 'IDLE'
+  | 'WORKING'
+  | 'WAITING_APPROVAL'
+  | 'COMPLETED'
   | 'ERROR';
 
 export type RiskOfBiasLevel = 'LOW' | 'SOME_CONCERNS' | 'HIGH' | 'UNCLEAR';
+
+export interface PicoData {
+  population: string;
+  intervention: string;
+  comparator: string;
+  outcome: string;
+}
 
 export interface PaperItem {
   id: string;
@@ -33,6 +40,8 @@ export interface PrismaMatrixItem {
   authors: string[];
   year: number;
   journal?: string;
+  qualis_capes?: string;
+  sjr_quartile?: string;
   population_n?: string;
   intervention?: string;
   comparator?: string;
@@ -56,6 +65,8 @@ export interface KnowledgeGapItem {
 export interface ReviewSession {
   review_id: string;
   query: string;
+  pico?: PicoData;
+  boolean_queries?: string[];
   current_step: string;
   hitl_pending: boolean;
   hitl_checkpoint?: 'screening' | 'bias_arbitration' | null;

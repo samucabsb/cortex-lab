@@ -1,6 +1,6 @@
 import logging
 import re
-from typing import List, Optional
+from typing import Dict, List, Optional
 import httpx
 from app.models.schemas import Paper
 from app.core.config import settings
@@ -14,6 +14,26 @@ def clean_doi(raw_doi: Optional[str]) -> Optional[str]:
         return None
     match = re.search(r"10\.\d{4,9}/[-._;()/:A-Za-z0-9]+", raw_doi)
     return match.group(0) if match else raw_doi.strip().lower()
+
+
+def reconstruct_abstract_from_inverted_index(inverted_index: Optional[Dict[str, List[int]]]) -> str:
+    """Reconstructs plain-text abstract from OpenAlex abstract_inverted_index."""
+    if not inverted_index or not isinstance(inverted_index, dict):
+        return ""
+    try:
+        word_positions: Dict[int, str] = {}
+        for word, positions in inverted_index.items():
+            if isinstance(positions, list):
+                for pos in positions:
+                    if isinstance(pos, int):
+                        word_positions[pos] = word
+        if not word_positions:
+            return ""
+        max_pos = min(max(word_positions.keys()), 2000)
+        words = [word_positions[i] for i in range(max_pos + 1) if i in word_positions]
+        return " ".join(words).strip()
+    except Exception:
+        return ""
 
 
 async def validate_doi_with_crossref(doi: str, client: Optional[httpx.AsyncClient] = None) -> bool:
@@ -41,7 +61,7 @@ async def validate_doi_with_crossref(doi: str, client: Optional[httpx.AsyncClien
 
 
 async def search_openalex(query: str, limit: int = 10) -> List[Paper]:
-    """Queries OpenAlex Open Data API (polite pool)."""
+    """Queries OpenAlex Open Data API (polite pool) and reconstructs full abstracts."""
     papers: List[Paper] = []
     url = "https://api.openalex.org/works"
     params = {
@@ -66,7 +86,10 @@ async def search_openalex(query: str, limit: int = 10) -> List[Paper]:
                 year = item.get("publication_year")
                 oa_info = item.get("open_access", {})
                 pdf_url = oa_info.get("oa_url")
-                journal = item.get("primary_location", {}).get("source", {}).get("display_name")
+                primary_loc = item.get("primary_location") or {}
+                source_info = primary_loc.get("source") or {}
+                journal = source_info.get("display_name")
+                abstract_text = reconstruct_abstract_from_inverted_index(item.get("abstract_inverted_index"))
 
                 papers.append(
                     Paper(
@@ -76,7 +99,7 @@ async def search_openalex(query: str, limit: int = 10) -> List[Paper]:
                         authors=authors[:5],
                         year=year,
                         journal=journal,
-                        abstract="",  # OpenAlex inverted index can be parsed if needed
+                        abstract=abstract_text,
                         source_api="OpenAlex",
                         open_access_pdf_url=pdf_url,
                         doi_verified=bool(doi),
@@ -168,7 +191,6 @@ async def federated_literature_search(query: str, limit_per_source: int = 8) -> 
     for res in results:
         if isinstance(res, list):
             for paper in res:
-                # Deduplication logic
                 norm_title = re.sub(r"\W+", "", paper.title.lower())
                 if paper.doi and paper.doi in seen_dois:
                     continue

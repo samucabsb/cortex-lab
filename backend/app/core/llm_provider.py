@@ -1,4 +1,6 @@
+import json
 import logging
+import re
 from typing import Optional, Any
 from app.core.config import settings
 
@@ -13,10 +15,15 @@ class MultiProviderLLMManager:
     """
 
     def __init__(self, byok_gemini: Optional[str] = None, byok_groq: Optional[str] = None):
-        self.gemini_key = byok_gemini or settings.GOOGLE_API_KEY
-        self.groq_key = byok_groq or settings.GROQ_API_KEY
+        self.gemini_key = (byok_gemini or settings.GOOGLE_API_KEY or "").strip()
+        self.groq_key = (byok_groq or settings.GROQ_API_KEY or "").strip()
         self.gemini_model_name = settings.GEMINI_MODEL
         self.groq_model_name = settings.GROQ_MODEL
+
+    @property
+    def has_active_key(self) -> bool:
+        """Returns True if at least one valid LLM API key is available."""
+        return bool(self.gemini_key or self.groq_key)
 
     def get_llm(self, preferred_provider: str = "gemini") -> Any:
         """Instantiates the best available LLM client."""
@@ -43,8 +50,7 @@ class MultiProviderLLMManager:
             except Exception as e:
                 logger.error(f"Failed to initialize Groq client: {e}")
 
-        # Return mock / offline fallback if no keys provided yet
-        logger.warning("No API keys found for Gemini or Groq. Operating in offline verification mode.")
+        logger.info("No API keys configured for Gemini or Groq. Operating in heuristic scientific extraction mode.")
         return None
 
     async def invoke_with_fallback(self, prompt: str, system_message: str = "") -> str:
@@ -59,7 +65,7 @@ class MultiProviderLLMManager:
                         messages.append(("system", system_message))
                     messages.append(("human", prompt))
                     response = await llm.ainvoke(messages)
-                    return response.content
+                    return str(response.content)
             except Exception as e:
                 logger.warning(f"Gemini call failed or hit rate limit: {e}. Switching to Groq fallback...")
 
@@ -73,11 +79,11 @@ class MultiProviderLLMManager:
                         messages.append(("system", system_message))
                     messages.append(("human", prompt))
                     response = await llm.ainvoke(messages)
-                    return response.content
+                    return str(response.content)
             except Exception as e:
                 logger.error(f"Groq fallback failed as well: {e}")
 
-        # 3. Deterministic Scientific Fallback Parser (Zero-Cost Offline mode)
+        # 3. Deterministic Scientific Fallback Marker
         return (
             "{\n"
             '  "status": "OFFLINE_VERIFIED",\n'
@@ -86,3 +92,29 @@ class MultiProviderLLMManager:
             '  "confidence": 0.85\n'
             "}"
         )
+
+    async def invoke_json(self, prompt: str, system_message: str = "") -> Optional[Any]:
+        """Invokes LLM expecting a JSON response, stripping markdown fences and parsing safely."""
+        if not self.has_active_key:
+            return None
+
+        raw_text = await self.invoke_with_fallback(prompt=prompt, system_message=system_message)
+        if not raw_text or '"status": "OFFLINE_VERIFIED"' in raw_text:
+            return None
+
+        # Clean ```json ... ``` blocks if present
+        cleaned = re.sub(r"^```(?:json)?\s*", "", raw_text.strip(), flags=re.IGNORECASE)
+        cleaned = re.sub(r"\s*```$", "", cleaned.strip())
+
+        try:
+            return json.loads(cleaned)
+        except json.JSONDecodeError:
+            # Attempt to extract first JSON object or array
+            match = re.search(r"(\{[\s\S]*\}|\[[\s\S]*\])", cleaned)
+            if match:
+                try:
+                    return json.loads(match.group(1))
+                except json.JSONDecodeError:
+                    pass
+            logger.warning("Could not parse JSON from LLM output; falling back to deterministic extractor.")
+            return None

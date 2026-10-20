@@ -15,8 +15,9 @@ export function useAgentStream(reviewId: string | null) {
       return;
     }
 
-    const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:7860';
-    const sseUrl = `${apiUrl}/api/v1/reviews/${reviewId}/events`;
+    const rawBase = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:7860/api').replace(/\/+$/, '');
+    const apiBase = rawBase.endsWith('/api') ? rawBase : `${rawBase}/api`;
+    const sseUrl = `${apiBase}/v1/reviews/${reviewId}/events`;
 
     try {
       const eventSource = new EventSource(sseUrl);
@@ -32,9 +33,8 @@ export function useAgentStream(reviewId: string | null) {
               hitl_pending: data.hitl_pending,
             });
 
-            // Map step to spatial bench
             const stepToBench: Record<string, AgentBenchId> = {
-              PLANNING: 'mining',
+              PLANNING: 'coordinator',
               MINING: 'mining',
               SCREENING_CHECKPOINT: 'hitl',
               AUDITING: 'auditing',
@@ -48,7 +48,6 @@ export function useAgentStream(reviewId: string | null) {
               setActiveBench(bench);
             }
 
-            // Sync agent statuses if provided
             if (data.agent_statuses) {
               Object.entries(data.agent_statuses).forEach(([agentId, status]) => {
                 updateAgentStatus(agentId, status as any);
@@ -61,7 +60,6 @@ export function useAgentStream(reviewId: string | null) {
       };
 
       eventSource.onerror = () => {
-        // SSE closed or errored, close gracefully
         if (eventSourceRef.current) {
           eventSourceRef.current.close();
           eventSourceRef.current = null;
@@ -75,7 +73,7 @@ export function useAgentStream(reviewId: string | null) {
         }
       };
     } catch (e) {
-      console.warn('[useAgentStream] EventSource not supported or failed to initialize:', e);
+      console.warn('[useAgentStream] EventSource failed to initialize:', e);
     }
   }, [reviewId, updateAgentStatus, setActiveBench, setReviewSession]);
 }

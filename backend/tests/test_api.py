@@ -9,7 +9,7 @@ try:
 except ImportError:
     pytest = None
 
-from app.services.open_apis import clean_doi
+from app.services.open_apis import clean_doi, reconstruct_abstract_from_inverted_index
 from app.services.pdf_parser import ScientificPDFParser
 from app.services.exporter import ScientificExporter
 from app.models.schemas import Paper, RiskOfBiasLevel
@@ -26,6 +26,12 @@ def test_clean_doi():
     assert clean_doi("https://doi.org/10.1038/s41586-020-2649-2") == "10.1038/s41586-020-2649-2"
     assert clean_doi("doi:10.1016/j.cell.2021.05.001") == "10.1016/j.cell.2021.05.001"
     assert clean_doi(None) is None
+
+
+def test_reconstruct_abstract():
+    inv = {"Randomized": [0], "trial": [1], "with": [2], "120": [3], "patients.": [4]}
+    text = reconstruct_abstract_from_inverted_index(inv)
+    assert text == "Randomized trial with 120 patients."
 
 
 def test_paper_schema():
