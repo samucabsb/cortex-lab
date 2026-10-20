@@ -27,66 +27,71 @@ async def synthesizer_node(state: LabGraphState) -> Dict[str, Any]:
     for item in audited:
         first_author = item["authors"][0] if item.get("authors") else "Author"
         first_word = first_author.split()[-1].replace(",", "") if first_author else "Author"
-        year = item.get("year", 2024)
-        cite_key = f"{first_word}{year}"
-        p_val_str = item.get("p_values", ["p < 0.05"])[0] if item.get("p_values") else "p < 0.05"
+        year = item.get("year")
+        year_str = str(year) if year else ""
+        cite_key = f"{first_word}{year_str or 'Study'}"
+        p_vals = item.get("p_values") or []
+        p_val_str = f"Significância ({p_vals[0]})" if p_vals else "p-valor não reportado"
 
+        doi_val = item.get("doi") or ""
         row_dict = {
             "paper_id": item.get("paper_id", f"paper_{cite_key}"),
-            "doi": item.get("doi", "10.1000/verified.doi"),
+            "doi": doi_val,
             "citation_key": cite_key,
             "title": item.get("title", "Estudo Científico"),
             "authors": item.get("authors", [first_author]),
-            "year": year,
-            "journal": item.get("journal", "Journal of Science"),
-            "qualis_capes": item.get("qualis_capes", "A1"),
-            "sjr_quartile": item.get("sjr_quartile", "Q1"),
-            "population_n": item.get("sample_size", "N/A"),
+            "year": year or 2024,
+            "journal": item.get("journal", "Periódico não informado"),
+            "qualis_capes": item.get("qualis_capes") or "N/A",
+            "sjr_quartile": item.get("sjr_quartile") or "N/A",
+            "population_n": item.get("sample_size", "Não reportado"),
             "intervention": default_intervention,
-            "comparator": item.get("control_group", "Controle ativo / Placebo"),
-            "outcomes": f"Significância reportada ({p_val_str}) — {item.get('bias_notes', 'Desfecho primário avaliado')[:90]}",
+            "comparator": item.get("control_group", "Não detalhado no resumo"),
+            "outcomes": f"{p_val_str} — {item.get('bias_notes', 'Desfecho primário avaliado')[:90]}",
             "risk_of_bias": item.get("risk_of_bias", RiskOfBiasLevel.LOW.value),
-            "statistical_soundness": "AUDITADO & VERIFICADO",
-            "traceable_quote": item.get("sample_quote", "Trecho metodológico auditado com sucesso."),
-            "page_reference": item.get("page_reference", 3),
+            "statistical_soundness": "AUDITADO (VIA ABSTRACT)" if item.get("sample_size") else "PENDENTE",
+            "traceable_quote": item.get("sample_quote", "Trecho metodológico não disponível."),
+            "page_reference": item.get("page_reference"),
         }
         matrix_rows.append(row_dict)
 
-    supporting_dois = [r["doi"] for r in matrix_rows[:4]] if matrix_rows else ["10.1016/sample.doi"]
+    supporting_dois = [r["doi"] for r in matrix_rows if r.get("doi")]
 
-    # Default structured Knowledge Gaps
-    gaps: List[Dict[str, Any]] = [
-        {
-            "gap_id": "GAP-001",
-            "title": f"Sustentabilidade longitudinal e desfechos tardios em '{topic}'",
-            "domain": "Metodologia & Seguimento Longitudinal",
-            "description": (
-                "A maioria dos estudos incluídos concentra a avaliação em janelas de curto a médio prazo, "
-                "sem acompanhamento prolongado (> 12 a 24 meses) para mensurar estabilidade do efeito."
-            ),
-            "unanswered_question": f"Qual é a durabilidade do efeito e segurança em longo prazo de intervenções em '{topic}'?",
-            "supporting_dois": supporting_dois,
-            "suggested_hypothesis": (
-                "Coortes prospectivas multicêntricas com seguimento de 24 meses revelarão necessidade de manutenção de protocolo."
-            ),
-        },
-        {
-            "gap_id": "GAP-002",
-            "title": "Padronização de grupos comparadores e reprodutibilidade inter-laboratorial",
-            "domain": "Padronização Metodológica & Validade Externa",
-            "description": (
-                "Observa-se heterogeneidade nos critérios de controle e tamanho amostral entre centros de pesquisa, "
-                "dificultando meta-análise quantitativa direta sem estratificação prévia."
-            ),
-            "unanswered_question": (
-                f"Como a padronização de parâmetros de controle e estratificação demográfica impacta a eficácia em '{topic}'?"
-            ),
-            "supporting_dois": supporting_dois[-2:] if len(supporting_dois) >= 2 else supporting_dois,
-            "suggested_hypothesis": (
-                "A adoção de protocolo duplamente cego padronizado reduzirá a variância inter-estudo em pelo menos 30%."
-            ),
-        },
-    ]
+    # Structured Knowledge Gaps derived from included studies or literature frontier
+    gaps: List[Dict[str, Any]] = []
+    if matrix_rows:
+        gaps = [
+            {
+                "gap_id": "GAP-001",
+                "title": f"Sustentabilidade longitudinal e desfechos tardios em '{topic}'",
+                "domain": "Metodologia & Seguimento Longitudinal",
+                "description": (
+                    "A maioria dos estudos incluídos concentra a avaliação em janelas de curto a médio prazo, "
+                    "sem acompanhamento prolongado (> 12 a 24 meses) para mensurar estabilidade do efeito."
+                ),
+                "unanswered_question": f"Qual é a durabilidade do efeito e segurança em longo prazo de intervenções em '{topic}'?",
+                "supporting_dois": supporting_dois[:3],
+                "suggested_hypothesis": (
+                    "Coortes prospectivas multicêntricas com seguimento de 24 meses demonstrarão necessidade de manutenção de protocolo."
+                ),
+            },
+            {
+                "gap_id": "GAP-002",
+                "title": "Padronização de grupos comparadores e reprodutibilidade inter-laboratorial",
+                "domain": "Padronização Metodológica & Validade Externa",
+                "description": (
+                    "Observa-se heterogeneidade nos critérios de controle e tamanho amostral entre centros de pesquisa, "
+                    "dificultando meta-análise quantitativa direta sem estratificação prévia."
+                ),
+                "unanswered_question": (
+                    f"Como a padronização de parâmetros de controle e estratificação demográfica impacta a eficácia em '{topic}'?"
+                ),
+                "supporting_dois": supporting_dois[-2:] if len(supporting_dois) >= 2 else supporting_dois,
+                "suggested_hypothesis": (
+                    "A adoção de protocolo com comparador ativo padronizado reduzirá a variância inter-estudo."
+                ),
+            },
+        ]
 
     # If LLM key is configured, synthesize tailored Knowledge Gaps from the actual corpus titles
     if llm_manager.has_active_key and matrix_rows:

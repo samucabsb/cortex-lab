@@ -25,6 +25,10 @@ class LabGraphState(TypedDict, total=False):
     boolean_queries: List[str]
     inclusion_criteria: List[str]
     exclusion_criteria: List[str]
+    max_papers: int
+    year_start: Optional[int]
+    year_end: Optional[int]
+    require_open_access: bool
     byok_gemini_key: Optional[str]
     byok_groq_key: Optional[str]
 

@@ -27,13 +27,107 @@ from app.db.supabase import (
 
 router = APIRouter(prefix="/v1", tags=["CortexLab Core"])
 
+DEMO_REVIEW_ID = "demo-cart-cells"
+
+
+def get_demo_review_state() -> LabGraphState:
+    return {
+        "review_id": DEMO_REVIEW_ID,
+        "query": "Eficácia e toxicidade de células CAR-T em tumores sólidos",
+        "topic": "Eficácia e toxicidade de células CAR-T em tumores sólidos",
+        "current_step": "SCREENING_CHECKPOINT",
+        "hitl_pending": True,
+        "hitl_checkpoint": "screening",
+        "status_message": "Agentes concluíram a busca inicial. 4 artigos aguardam triagem humana.",
+        "pico": {
+            "population": "Pacientes adultos com neoplasias sólidas refratárias ou modelos pré-clínicos in-vivo",
+            "intervention": "Terapia celular adotiva com linfócitos T modificados (CAR-T Cells de 2ª e 3ª geração)",
+            "comparator": "Quimioterapia citotóxica padrão, inibidores de checkpoint imune (anti-PD-1) ou placebo",
+            "outcome": "Taxa de resposta objetiva (ORR), sobrevida livre de progressão (PFS) e síndrome de liberação de citocinas (CRS)",
+        },
+        "boolean_queries": [
+            '("CAR-T" OR "Chimeric Antigen Receptor") AND ("solid tumors" OR "neoplasms") AND (randomized OR clinical trial)',
+            '("CAR-T cells"[Title/Abstract]) AND ("toxicity" OR "efficacy") AND (control OR comparator)',
+            '("Adoptive T-cell therapy") AND ("microenvironment") AND (OpenAlex OR EuropePMC)',
+        ],
+        "active_agent": "miner",
+        "current_bench": "bench_hitl",
+        "agent_statuses": {
+            "coordinator": "DONE",
+            "miner": "DONE",
+            "methodologist": "IDLE",
+            "synthesizer": "IDLE",
+        },
+        "raw_papers": [
+            {
+                "id": "openalex:W43819201",
+                "doi": "10.1038/s41591-023-02612-8",
+                "title": "Armored CAR-T cells overcome immunosuppressive tumor microenvironment in solid malignancies: a randomized phase II trial",
+                "authors": ["Mackall, C. L.", "June, C. H.", "Silva, R. M."],
+                "year": 2024,
+                "journal": "Nature Medicine",
+                "abstract": "Background: Chimeric antigen receptor (CAR) T-cell therapy has shown limited efficacy in solid tumors due to T-cell exhaustion. Methods: We randomized n = 128 patients with refractory solid tumors into armored CAR-T versus standard immunotherapy. Results: Armored CAR-T achieved an objective response rate of 54% (p < 0.001) with manageable grade 1-2 cytokine release syndrome.",
+                "source_api": "OpenAlex",
+                "doi_verified": True,
+                "citation_count": 142,
+                "is_screened_in": True,
+            },
+            {
+                "id": "europepmc:PMC1092837",
+                "doi": "10.1056/nejmoa2308912",
+                "title": "GD2-targeted CAR T cells in high-risk neuroblastoma and solid pediatric sarcomas: long-term follow-up",
+                "authors": ["Locatelli, F.", "Quintarelli, C.", "De Angelis, B."],
+                "year": 2024,
+                "journal": "New England Journal of Medicine",
+                "abstract": "Methods: Prospective cohort of 84 patients treated with third-generation GD2-CAR T cells. Primary endpoints were safety and 3-year event-free survival. Results: Complete remission was observed in 63% of subjects (p = 0.004) compared to historical controls.",
+                "source_api": "Europe PMC",
+                "doi_verified": True,
+                "citation_count": 215,
+                "is_screened_in": True,
+            },
+            {
+                "id": "openalex:W43901122",
+                "doi": "10.1158/2159-8290.cd-23-0411",
+                "title": "Preliminary single-arm evaluation of mesothelin-directed CAR-T infusion in pleural mesothelioma",
+                "authors": ["Wang, Y.", "Chen, L.", "Oliveira, S."],
+                "year": 2023,
+                "journal": "Cancer Discovery",
+                "abstract": "We evaluated 18 patients in an unblinded pilot study without an active comparator arm. Marginal tumor regression was noted (p = 0.048), though high drop-out rates and absence of power calculation limit generalizability.",
+                "source_api": "OpenAlex",
+                "doi_verified": True,
+                "citation_count": 34,
+                "is_screened_in": True,
+            },
+            {
+                "id": "europepmc:PMC1104921",
+                "doi": "10.1016/s1470-2045(24)00091-3",
+                "title": "Dual-targeting Claudin18.2 and PD-L1 CAR-T therapy in advanced gastric and pancreatic adenocarcinoma",
+                "authors": ["Shen, L.", "Qi, C.", "Zhang, X."],
+                "year": 2024,
+                "journal": "The Lancet Oncology",
+                "abstract": "In this multicenter controlled study of 160 participants, dual-targeting CAR-T cells demonstrated superior progression-free survival (median 8.4 months vs 3.9 months, p < 0.001) with blinded independent central review.",
+                "source_api": "Europe PMC",
+                "doi_verified": True,
+                "citation_count": 96,
+                "is_screened_in": True,
+            },
+        ],
+        "screened_papers": [],
+        "audited_papers": [],
+        "prisma_matrix": [],
+        "knowledge_gaps": [],
+    }
+
+
 # In-memory store for active research reviews (backed by Supabase in production)
-REVIEWS_DATABASE: Dict[str, LabGraphState] = {}
+REVIEWS_DATABASE: Dict[str, LabGraphState] = {
+    DEMO_REVIEW_ID: get_demo_review_state(),
+}
 
 
 @router.post("/reviews", summary="Inicia nova revisão sistemática com agentes")
 async def create_review(payload: CreateReviewRequest):
-    review_id = str(uuid.uuid4())[:8]
+    review_id = str(uuid.uuid4())
 
     initial_state: LabGraphState = {
         "review_id": review_id,
@@ -41,6 +135,10 @@ async def create_review(payload: CreateReviewRequest):
         "topic": payload.topic,
         "inclusion_criteria": payload.inclusion_criteria,
         "exclusion_criteria": payload.exclusion_criteria,
+        "max_papers": payload.max_papers,
+        "year_start": payload.year_start,
+        "year_end": payload.year_end,
+        "require_open_access": payload.require_open_access,
         "byok_gemini_key": payload.byok_gemini_key,
         "byok_groq_key": payload.byok_groq_key,
         "active_agent": "coordinator",
@@ -108,7 +206,10 @@ async def create_review(payload: CreateReviewRequest):
 async def get_review(review_id: str):
     if review_id not in REVIEWS_DATABASE:
         raise HTTPException(status_code=404, detail="Review session not found")
-    return REVIEWS_DATABASE[review_id]
+    safe_state = dict(REVIEWS_DATABASE[review_id])
+    safe_state.pop("byok_gemini_key", None)
+    safe_state.pop("byok_groq_key", None)
+    return safe_state
 
 
 @router.post("/reviews/{review_id}/hitl", summary="Validação humana (Human-in-the-Loop)")
@@ -123,7 +224,7 @@ async def submit_hitl_decision(review_id: str, decision: HITLDecisionRequest):
         for p in state.get("raw_papers", []):
             p["is_screened_in"] = p["id"] not in rejected_set
 
-        # 1. Human node
+        # 1. Human screening gate
         screened_res = human_screening_node(state)
         state.update(screened_res)
 
@@ -131,7 +232,22 @@ async def submit_hitl_decision(review_id: str, decision: HITLDecisionRequest):
         audit_res = await methodologist_node(state)
         state.update(audit_res)
 
-        # 3. Synthesizer node (Always generate PRISMA matrix & Knowledge Gaps for immediate inspection)
+        # CHECKPOINT 2: If methodologist flagged high bias requiring arbitration, PAUSE workflow
+        if state.get("hitl_pending") and state.get("hitl_checkpoint") == "bias_arbitration":
+            REVIEWS_DATABASE[review_id] = state
+            return {
+                "review_id": review_id,
+                "status": state["current_step"],
+                "hitl_pending": True,
+                "hitl_checkpoint": "bias_arbitration",
+                "message": state["status_message"],
+                "audited_papers": state.get("audited_papers", []),
+                "matrix_rows": 0,
+                "prisma_matrix": [],
+                "knowledge_gaps": [],
+            }
+
+        # 3. Synthesizer node (When no bias arbitration is pending)
         synth_res = await synthesizer_node(state)
         state.update(synth_res)
 

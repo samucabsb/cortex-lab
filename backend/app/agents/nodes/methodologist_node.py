@@ -10,70 +10,81 @@ logger = logging.getLogger("cortexlab.agents.methodologist")
 
 
 def _extract_heuristic_audit_from_abstract(paper: Dict[str, Any], idx: int) -> Dict[str, Any]:
-    """Extracts real sample size, p-values, quotes, and RoB 2 estimation directly from the paper's text/abstract."""
-    title = paper.get("title", "Scientific Study")
+    """Extracts verifiable sample size, p-values, quotes, and RoB 2 estimation directly from the paper's text/abstract.
+
+    Enforces scientific integrity: missing evidence is marked explicitly as not reported rather than fabricated.
+    """
+    title = paper.get("title", "Estudo Científico")
     abstract = (paper.get("abstract") or "").strip()
-    doi = paper.get("doi") or f"10.1000/verified.{idx + 1}"
-    year = paper.get("year") or 2024
-    journal = paper.get("journal") or "Indexed Scientific Journal"
+    doi = paper.get("doi") or None
+    year = paper.get("year")
+    journal = paper.get("journal") or "Periódico não informado"
     citations = int(paper.get("citation_count") or 0)
 
     # 1. Try to extract real sample size (e.g., "n = 120", "150 patients", "45 participants")
     sample_n = None
     if abstract:
         n_match = re.search(
-            r"\b(?:n\s*=\s*(\d+)|(\d{2,5})\s+(?:patients|participants|subjects|samples|trials|studies|pacientes|sujeitos))\b",
+            r"\b(?:n\s*=\s*(\d+)|(\d{1,5})\s+(?:patients|participants|subjects|samples|trials|studies|pacientes|sujeitos|indivíduos))\b",
             abstract,
             flags=re.IGNORECASE,
         )
         if n_match:
             val = n_match.group(1) or n_match.group(2)
-            sample_n = f"N = {val} (extraído do texto)"
+            sample_n = f"N = {val}"
 
     if not sample_n:
-        fallback_samples = ["N = 124 participantes", "N = 86 sujeitos", "N = 48 modelos", "N = 210 coorte"]
-        sample_n = fallback_samples[idx % len(fallback_samples)]
+        sample_n = "Não reportado no abstract"
 
     # 2. Try to extract real p-values from abstract
     p_vals: List[str] = []
     if abstract:
         p_matches = re.findall(r"\bp\s*[<=>]\s*0\.\d+", abstract, flags=re.IGNORECASE)
         if p_matches:
-            p_vals = p_matches[:2]
-    if not p_vals:
-        default_p = ["p < 0.001", "p = 0.018", "p = 0.047 (limítrofe)", "p < 0.01"]
-        p_vals = [default_p[idx % len(default_p)]]
+            p_vals = p_matches[:3]
 
-    # 3. Estimate Qualis / SJR based on citation impact or journal presence
-    if citations >= 50 or idx % 3 == 0:
+    # 3. Stratify Qualis / SJR based strictly on citation count and journal indexing
+    if citations >= 50:
         qualis, sjr = "A1", "Q1"
-    elif citations >= 15 or idx % 3 == 1:
+    elif citations >= 20:
         qualis, sjr = "A2", "Q1"
+    elif citations >= 5:
+        qualis, sjr = "B1", "Q2"
     else:
-        qualis, sjr = "A3", "Q2"
+        qualis, sjr = "N/A", "N/A"
 
     # 4. Extract a real verbatim quote from the abstract if available
-    if abstract and len(abstract) > 60:
-        sentences = [s.strip() for s in re.split(r"(?<=[.!?])\s+", abstract) if len(s.strip()) > 35]
+    if abstract and len(abstract) > 40:
+        sentences = [s.strip() for s in re.split(r"(?<=[.!?])\s+", abstract) if len(s.strip()) > 30]
         selected_sentence = sentences[-1] if len(sentences) > 1 else sentences[0]
-        quote_text = f'"{selected_sentence[:240]}" (DOI: {doi})'
+        doi_suffix = f" (DOI: {doi})" if doi else ""
+        quote_text = f'"{selected_sentence[:240]}"{doi_suffix}'
     else:
-        quote_text = (
-            f"Evidência auditada no registro '{title[:70]}...' — "
-            f"protocolo metodológico verificado sob DOI {doi}."
-        )
+        doi_suffix = f" (DOI: {doi})" if doi else ""
+        quote_text = f"Registro '{title[:70]}...'{doi_suffix} — abstract não disponível para extração direta."
 
-    # 5. Evaluate Risk of Bias (RoB 2)
+    # 5. Evaluate Risk of Bias (RoB 2) based on documented study methodology
     abs_lower = abstract.lower()
-    if idx == 2 and idx > 0:
+    if not abstract:
+        bias_level = RiskOfBiasLevel.UNCLEAR
+        bias_notes = "Resumo indisponível; auditoria RoB 2 requer leitura de texto completo."
+        control_group = "Não informado"
+        stat_test = "Não informado"
+    elif any(k in abs_lower for k in ["pilot", "unblinded", "single-arm", "without control", "sem controle"]):
         bias_level = RiskOfBiasLevel.HIGH
-        bias_notes = "Amostra reduzida ou ausência de descrição de mascaramento duplo-cego e cálculo de poder amostral."
-    elif "random" in abs_lower or "double-blind" in abs_lower or "systematic" in abs_lower or idx % 2 == 0:
+        bias_notes = "Indício de estudo preliminar, braço único ou ausência de grupo comparador descrita no resumo."
+        control_group = "Sem grupo comparador ativo identificado no resumo"
+        stat_test = "Estatística descritiva / preliminar"
+    elif any(k in abs_lower for k in ["randomized", "double-blind", "placebo-controlled", "randomizado", "duplo-cego"]):
         bias_level = RiskOfBiasLevel.LOW
-        bias_notes = "Desenho metodológico estruturado com controle explícito e critérios objetivos de desfecho."
+        bias_notes = "Desenho controlado e randomizado descrito no resumo com critérios explícitos."
+        control_group = "Grupo controle / placebo reportado"
+        stat_test = "Análise estatística inferencial comparativa"
     else:
         bias_level = RiskOfBiasLevel.SOME_CONCERNS
-        bias_notes = "Relato parcial do processo de alocação/cegamento no resumo disponível."
+        bias_notes = "Relato em resumo não detalha integralmente método de mascaramento ou alocação."
+        control_group = "Comparador não detalhado no resumo"
+        stat_test = "Significância reportada (p-valor)" if p_vals else "Não detalhado no resumo"
 
     return {
         "paper_id": paper.get("id", f"paper_{idx + 1}"),
@@ -85,13 +96,13 @@ def _extract_heuristic_audit_from_abstract(paper: Dict[str, Any], idx: int) -> D
         "qualis_capes": qualis,
         "sjr_quartile": sjr,
         "sample_size": sample_n,
-        "statistical_test": "Análise Multivariada / Teste de Hipótese Controlado",
+        "statistical_test": stat_test,
         "p_values": p_vals,
         "risk_of_bias": bias_level.value,
         "bias_notes": bias_notes,
-        "control_group": "Grupo comparador ativo / Controle padrão reportado",
+        "control_group": control_group,
         "sample_quote": quote_text,
-        "page_reference": 1 + (idx % 6),
+        "page_reference": None,
     }
 
 

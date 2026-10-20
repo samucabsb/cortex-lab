@@ -13,6 +13,7 @@ class ScientificExporter:
         author_clean = re.sub(r"[^a-zA-Z]", "", author) or "Study"
         return f"{author_clean}{year or 2024}"
 
+
     @classmethod
     def export_prisma_matrix_csv(cls, matrix_rows: List[Dict[str, Any]]) -> str:
         """Exports the PRISMA 2020 Systematic Review Matrix as an RFC-4180 compliant CSV string."""
@@ -36,6 +37,12 @@ class ScientificExporter:
             "PageReference",
         ]
 
+        def sanitize_cell(val: Any) -> str:
+            s = str(val) if val is not None else ""
+            if s and s[0] in ("=", "+", "-", "@", "\t", "\r"):
+                return f"'{s}"
+            return s
+
         writer = csv.DictWriter(output, fieldnames=fieldnames, quoting=csv.QUOTE_ALL)
         writer.writeheader()
 
@@ -44,22 +51,22 @@ class ScientificExporter:
             authors_str = "; ".join(authors) if isinstance(authors, list) else str(authors)
 
             writer.writerow({
-                "CitationKey": row.get("citation_key", ""),
-                "DOI": row.get("doi", ""),
-                "Title": row.get("title", ""),
-                "Authors": authors_str,
-                "Year": row.get("year", ""),
-                "Journal": row.get("journal", ""),
-                "QualisCAPES": row.get("qualis_capes", "N/A"),
-                "SJRQuartile": row.get("sjr_quartile", "N/A"),
-                "PopulationN": row.get("population_n", ""),
-                "Intervention": row.get("intervention", ""),
-                "Comparator": row.get("comparator", ""),
-                "Outcomes": row.get("outcomes", ""),
-                "RiskOfBias": row.get("risk_of_bias", "LOW"),
-                "StatisticalSoundness": row.get("statistical_soundness", "AUDITED"),
-                "TraceableQuote": row.get("traceable_quote", ""),
-                "PageReference": row.get("page_reference", ""),
+                "CitationKey": sanitize_cell(row.get("citation_key", "")),
+                "DOI": sanitize_cell(row.get("doi", "")),
+                "Title": sanitize_cell(row.get("title", "")),
+                "Authors": sanitize_cell(authors_str),
+                "Year": sanitize_cell(row.get("year", "")),
+                "Journal": sanitize_cell(row.get("journal", "")),
+                "QualisCAPES": sanitize_cell(row.get("qualis_capes", "N/A")),
+                "SJRQuartile": sanitize_cell(row.get("sjr_quartile", "N/A")),
+                "PopulationN": sanitize_cell(row.get("population_n", "")),
+                "Intervention": sanitize_cell(row.get("intervention", "")),
+                "Comparator": sanitize_cell(row.get("comparator", "")),
+                "Outcomes": sanitize_cell(row.get("outcomes", "")),
+                "RiskOfBias": sanitize_cell(row.get("risk_of_bias", "LOW")),
+                "StatisticalSoundness": sanitize_cell(row.get("statistical_soundness", "AUDITED")),
+                "TraceableQuote": sanitize_cell(row.get("traceable_quote", "")),
+                "PageReference": sanitize_cell(row.get("page_reference", "")),
             })
 
         return output.getvalue()
@@ -70,6 +77,12 @@ class ScientificExporter:
 
         Fully compatible with reference managers: Zotero, Mendeley, JabRef, and EndNote.
         """
+        def escape_bibtex(val: str) -> str:
+            val = re.sub(r"(?<!\\)&", r"\&", val)
+            val = re.sub(r"(?<!\\)%", r"\%", val)
+            val = re.sub(r"(?<!\\)_", r"\_", val)
+            return val
+
         entries = []
         for row in matrix_rows:
             authors = row.get("authors", [])
@@ -82,10 +95,10 @@ class ScientificExporter:
 
             year = row.get("year") or 2024
             cite_key = row.get("citation_key") or cls.clean_bibtex_key(first_author, year)
-            title = row.get("title", "Untitled Scientific Study")
+            title = escape_bibtex(str(row.get("title", "Untitled Scientific Study")))
             doi = row.get("doi", "")
-            journal = row.get("journal", "Academic Journal")
-            note_str = (
+            journal = escape_bibtex(str(row.get("journal", "Academic Journal")))
+            note_str = escape_bibtex(
                 f"Audited by CortexLab; RoB: {row.get('risk_of_bias', 'LOW')}; "
                 f"Qualis: {row.get('qualis_capes', 'N/A')}"
             )

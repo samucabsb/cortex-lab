@@ -148,6 +148,80 @@ def test_modular_agent_nodes():
     assert len(synth_out["knowledge_gaps"]) >= 1
 
 
+def test_heuristic_audit_honest_nulls():
+    """Enforces RNF-01 & RNF-02: Missing scientific data must never be fabricated with fake constants."""
+    from app.agents.nodes.methodologist_node import _extract_heuristic_audit_from_abstract
+
+    empty_paper = {
+        "id": "paper_empty",
+        "title": "Study Without Abstract",
+        "doi": None,
+        "abstract": "",
+    }
+    audited = _extract_heuristic_audit_from_abstract(empty_paper, idx=0)
+    assert audited["doi"] is None
+    assert audited["sample_size"] == "Não reportado no abstract"
+    assert audited["p_values"] == []
+    assert audited["page_reference"] is None
+    assert audited["risk_of_bias"] == RiskOfBiasLevel.UNCLEAR.value
+
+
+def test_byok_sanitization_in_get_review():
+    """Enforces RNF-07: BYOK API keys must never leak in API GET responses."""
+    from app.api.v1.router import REVIEWS_DATABASE, get_review
+
+    test_rev_id = "test-byok-leak-prevention"
+    REVIEWS_DATABASE[test_rev_id] = {
+        "review_id": test_rev_id,
+        "topic": "Oncology",
+        "byok_gemini_key": "AIzaSy_SUPER_SECRET_KEY",
+        "byok_groq_key": "gsk_SUPER_SECRET_KEY",
+        "current_step": "SCREENING_CHECKPOINT",
+        "raw_papers": [],
+    }
+
+    sanitized = asyncio.run(get_review(test_rev_id))
+    assert "byok_gemini_key" not in sanitized
+    assert "byok_groq_key" not in sanitized
+    assert sanitized["review_id"] == test_rev_id
+
+
+def test_bias_arbitration_pauses_workflow():
+    """Enforces RF-19: Detection of high risk of bias must halt at BIAS_ARBITRATION_CHECKPOINT."""
+    from app.api.v1.router import REVIEWS_DATABASE, submit_hitl_decision
+    from app.models.schemas import HITLDecisionRequest
+
+    test_rev_id = "test-bias-pause"
+    REVIEWS_DATABASE[test_rev_id] = {
+        "review_id": test_rev_id,
+        "topic": "Mesothelioma Pilot Study",
+        "raw_papers": [
+            {
+                "id": "p_single_arm",
+                "doi": "10.1000/pilot",
+                "title": "Unblinded Single-Arm Pilot Trial",
+                "abstract": "This was an unblinded pilot study without control group.",
+                "is_screened_in": True,
+            }
+        ],
+        "agent_statuses": {},
+    }
+
+    decision = HITLDecisionRequest(
+        review_id=test_rev_id,
+        step_checkpoint="screening",
+        action="APPROVE",
+        approved_paper_ids=["p_single_arm"],
+    )
+
+    result = asyncio.run(submit_hitl_decision(test_rev_id, decision))
+    assert result["hitl_pending"] is True
+    assert result["hitl_checkpoint"] == "bias_arbitration"
+    assert result["status"] == "BIAS_ARBITRATION_CHECKPOINT"
+    assert result["matrix_rows"] == 0
+    assert result["prisma_matrix"] == []
+
+
 if __name__ == "__main__":
     test_clean_doi()
     test_paper_schema()
@@ -155,4 +229,7 @@ if __name__ == "__main__":
     test_prompts_loader()
     test_scientific_exporter()
     test_modular_agent_nodes()
-    print("ALL TESTS (INCLUDING EXPANDED MODULES) PASSED SUCCESSFULLY!")
+    test_heuristic_audit_honest_nulls()
+    test_byok_sanitization_in_get_review()
+    test_bias_arbitration_pauses_workflow()
+    print("ALL TESTS (INCLUDING SPRINT 1 SECURITY & INTEGRITY SUITE) PASSED SUCCESSFULLY!")

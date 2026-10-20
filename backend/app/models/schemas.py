@@ -72,20 +72,22 @@ class RiskOfBiasReport(BaseModel):
 
 class PrismaMatrixRow(BaseModel):
     paper_id: str
-    doi: str
+    doi: Optional[str] = None
     citation_key: str
     title: str
     authors: List[str]
-    year: int
+    year: Optional[int] = None
     journal: Optional[str] = None
+    qualis_capes: Optional[str] = "N/A"
+    sjr_quartile: Optional[str] = "N/A"
     population_n: Optional[str] = None
     intervention: Optional[str] = None
     comparator: Optional[str] = None
     outcomes: Optional[str] = None
     risk_of_bias: RiskOfBiasLevel = RiskOfBiasLevel.LOW
-    statistical_soundness: str = "VALIDATED"
+    statistical_soundness: str = "AUDITED"
     traceable_quote: str
-    page_reference: Optional[int] = 1
+    page_reference: Optional[int] = None
 
 
 class KnowledgeGap(BaseModel):
