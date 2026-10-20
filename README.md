@@ -17,10 +17,11 @@
 O **CortexLab** é uma plataforma de **Human Augmentation** projetada para transformar a maneira como pesquisadores, pós-graduandos e laboratórios conduzem **Revisões Sistemáticas de Literatura** e **Auditorias Metodológicas**.
 
 Diferente de chatbots genéricos que resumem textos superficialmente e inventam citações, o CortexLab combina:
-1. **Motor Multi-Agente Científico (Python, FastAPI, LangGraph):** Minera APIs públicas abertas (OpenAlex, Europe PMC, PubMed/NCBI, SciELO, arXiv), valida DOIs criptograficamente na Crossref, disseca seções de métodos/resultados e audita rigor estatístico ($p$-hacking, $N$ amostral, risco de viés RoB 2).
-2. **Interface Split-View "Clean Academic Daylight" (Next.js, Tailwind CSS, Framer Motion):** Inspirada em ferramentas como **Elicit.com, Notion e Linear**, une em tela dividida uma maquete arquitetônica iluminada do laboratório de pesquisa (Diorama HD-2D) a um Caderno de Extração Científica completo com a Matriz PRISMA 2020.
-3. **Supervisão Humana Soberana (Human-in-the-Loop):** Portões de validação no grafo onde os assistentes de IA pausam a execução e aguardam o crivo do pesquisador em etapas críticas de triagem de elegibilidade e arbitragem de risco de viés.
-4. **Arquitetura 100% Gratuita (Zero-Cost):** Projetada para rodar integralmente nas cotas gratuitas do Google Gemini, Groq Cloud, Supabase, Hugging Face Spaces e Vercel, com suporte a BYOK (*Bring Your Own Key*) direto no navegador.
+1. **Motor Multi-Agente Científico (Python, FastAPI, LangGraph):** Minera APIs públicas abertas (OpenAlex, Europe PMC, PubMed/NCBI, SciELO, arXiv), valida DOIs na Crossref com requisição HTTP obrigatória, disseca seções de métodos/resultados e audita rigor estatístico (amostra $N$, $p$-valores honestamente reportados e risco de viés Cochrane RoB 2).
+2. **Interface em Fluxo Guiado de 4 Etapas "Clean Academic Daylight" (Next.js 14, Tailwind CSS, HTML5 Canvas 2D HD-2D):** Inspirada na sobriedade de **Linear, Notion e Elicit**, conduz o pesquisador em uma jornada linear e sem sobrecarga cognitiva: Etapa 1 (Pergunta & Protocolo PICO) ➔ Etapa 2 (Laboratório Pixel Art HD-2D Vivo) ➔ Etapa 3 (Triagem Humana Soberana HITL) ➔ Etapa 4 (Caderno PRISMA 2020, Cochrane RoB 2 e Lacunas Científicas).
+3. **Laboratório Isométrico Pixel Art HD-2D Vivo (`IsometricLabCanvas.tsx`):** Renderizado em HTML5 Canvas 2D a 60 FPS com zero dependências de bibliotecas 3D pesadas (sem Three.js/WebGL), apresentando 7 cientistas com funções reais conectadas ao código do backend em 5 salas interconectadas (Coordenação PICO, Mineração/Crossref, Supervisão HITL, Auditoria RoB 2 e Biblioteca PRISMA), com animações de handoff físico de documentos pelas portas e corredores.
+4. **Supervisão Humana Soberana (Human-in-the-Loop):** Portões de validação no grafo onde os assistentes de IA pausam a execução e aguardam o crivo do pesquisador em etapas críticas de triagem de elegibilidade e arbitragem de risco de viés.
+5. **Arquitetura 100% Gratuita (Zero-Cost):** Projetada para rodar integralmente nas cotas gratuitas do Google Gemini, Groq Cloud, Supabase, Hugging Face Spaces e Vercel, com suporte a BYOK (*Bring Your Own Key*) direto no navegador e sessão demonstrativa pré-semeada out-of-the-box.
 
 ---
 
@@ -55,23 +56,24 @@ graph LR
     Synthesizer --> Export[CSV / BibTeX<br/>Export Engine]
 ```
 
-### Bancadas Especializadas no Laboratório Virtual
-- 🧭 **Bancada de Coordenação (`pi_coordinator_node`):** Enquadra a pergunta do pesquisador no formato PICO (*Population, Intervention, Comparator, Outcome*) e elabora estratégias de busca booleana com descritores controlados (MeSH/DeCS).
-- 🔍 **Bancada de Mineração (`miner_node`):** Executa buscas federadas em OpenAlex, PubMed e SciELO, elimina duplicatas e valida o DOI na Crossref.
-- 🛑 **Mesa de Supervisão Científica (`human_screening_node`):** Onde o pesquisador humano exerce controle soberano sobre quais artigos serão admitidos para a leitura aprofundada.
-- 📊 **Bancada de Rigor Metodológico (`methodologist_node`):** Avalia o risco de viés de acordo com o padrão RoB 2 / STROBE, extrai tamanho amostral $N$, checa grupos controle e sinaliza $p$-valores limítrofes.
-- 📑 **Mesa de Síntese PRISMA (`synthesizer_node`):** Consolida as colunas da Matriz PRISMA 2020 (incluindo estratificação Qualis CAPES e Quartil SJR) e mapeia **Knowledge Gaps** com hipóteses científicas testáveis.
+### 🏢 Salas e Cientistas no Laboratório Virtual HD-2D
+- 🧭 **Sala 01: Coordenação PI (`pi_coordinator_node`):** Dr. Turing decompõe a pergunta de pesquisa no protocolo PICO 2x2 no quadro digital e elabora estratégias de busca booleana com descritores controlados (MeSH/DeCS). Ao concluir, caminha até a Sala 02 para entregar o protocolo à Dra. Ada.
+- 🔍 **Sala 02: Mineração & Validação (`miner_node`):** Dra. Ada minera artigos científicos nas APIs abertas (OpenAlex, Europe PMC, PubMed) enquanto Dr. Cross valida os DOIs contra o servidor oficial da Crossref e elimina duplicatas. O pacote validado é levado até a Sala 03 Central.
+- 🛑 **Sala 03 Central: Supervisão Humana Soberana (HITL - `human_screening_node` / `human_bias_node`):** O avatar do pesquisador humano decide quais artigos entram na revisão sistemática e arbitra estudos com alto risco de viés, entregando a pasta aprovada para a Sala 04.
+- 📊 **Sala 04: Auditoria Metodológica & Estatística (`methodologist_node`):** Dr. Fitz extrai tamanho amostral $N$, grupo controle e $p$-valores na bancada frontal e entrega para a Dra. Cochrane na bancada superior, que classifica o estudo segundo o Cochrane RoB 2 / STROBE e leva os laudos à Biblioteca.
+- 📑 **Sala 05: Biblioteca & Síntese PRISMA (`synthesizer_node`):** Dra. Rosalind cruza referências nas estantes, consolida a Matriz PRISMA 2020 (com Qualis CAPES e Quartil SJR), mapeia as Lacunas de Conhecimento (*Knowledge Gaps*) e gera as fichas comparativas e arquivos `.CSV` e `.BibTeX`.
 
 ---
 
 ## 🎨 Identidade Visual & UX: Design System "Clean Academic Daylight"
 
-Inspirado nas melhores práticas de interfaces acadêmicas modernas (**Elicit.com, Notion e Linear**):
-- **Superfície Clara e Iluminada:** Fundo em `bg-slate-50` (`#F8FAFC`), cartões em branco puro (`bg-white`) com bordas suaves (`border-slate-200`) e tipografia editorial **Inter / Plus Jakarta Sans**.
-- **Layout Split-View (Tela Dividida):**
-  - **Lado Esquerdo:** Maquete arquitetônica iluminada do laboratório (Diorama Isométrico HD-2D) com bancadas identificadas e balões de fala dos agentes.
-  - **Lado Direito:** Caderno de Pesquisa Científico contendo o formulário de busca, pílulas de temas acadêmicos, cartões de Knowledge Gaps e a Matriz PRISMA interativa com busca instantânea.
-- **Stepper Horizontal:** Guia o pesquisador pelas 4 etapas da revisão (`1. Estruturação PICO` ➔ `2. Mineração de Artigos` ➔ `3. Auditoria Metodológica` ➔ `4. Síntese PRISMA`).
+Inspirado nas melhores práticas editoriais acadêmicas (**Linear, Notion e Elicit.com**):
+- **Superfície Clara e Iluminada:** Fundo editorial em `#FAF9F6`, cartões em branco puro com bordas suaves (`border-slate-200`) e tipografia editorial (**Newsreader** para títulos serifados e **Plus Jakarta Sans** para corpo de texto).
+- **Fluxo Guiado de 4 Etapas (Zero Poluição Visual):** Exibe com clareza estrita apenas 1 etapa por vez:
+  - **Etapa 1:** Pergunta de Pesquisa, Quadro PICO 2x2 e Query Booleana com suporte a exemplos reais e modo demonstrativo pré-carregado.
+  - **Etapa 2:** Laboratório Científico Pixel Art HD-2D vivo em tela cheia com telemetria e cards didáticos de cada sala.
+  - **Etapa 3:** Triagem Humana Soberana (HITL) com cards grandes e selecionáveis diretamente na tela.
+  - **Etapa 4:** Caderno de Síntese PRISMA 2020 com alternância entre Fichas Detalhadas e Tabela Comparativa, citação literal rastreada (*verbatim*), Knowledge Gaps e barra de exportação para Excel (.CSV) e BibTeX (.bib).
 
 ---
 
@@ -260,7 +262,7 @@ cortex-lab/
 │   │   │   └── useAgentStream.ts      # Consumo em tempo real de eventos SSE
 │   │   ├── components/
 │   │   │   ├── spatial/
-│   │   │   │   └── IsometricLabCanvas.tsx  # Laboratório 3D WebGL (Three.js) interativo
+│   │   │   │   └── IsometricLabCanvas.tsx  # Laboratório Isométrico Pixel Art HD-2D (HTML5 Canvas 2D, 60 FPS)
 │   │   │   ├── dashboard/
 │   │   │   │   ├── PrismaMatrixTable.tsx   # Tabela comparativa limpa estilo Elicit/Notion
 │   │   │   │   ├── KnowledgeGapsCard.tsx   # Cards editoriais de lacunas científicas

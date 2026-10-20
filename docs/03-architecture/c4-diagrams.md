@@ -53,7 +53,7 @@ C4Container
     Person(researcher, "Pesquisador", "Usuário final da plataforma")
 
     Container_Boundary(frontend_app, "Frontend (Vercel Free Tier)") {
-        Container(spatial_ui, "Spatial Canvas (HD-2D)", "React / Three.js / Phaser", "Renderiza o laboratório virtual isométrico com iluminação e bancadas de trabalho.")
+        Container(spatial_ui, "Spatial Canvas (HD-2D)", "React / HTML5 Canvas 2D (60 FPS)", "Renderiza o laboratório virtual isométrico com 5 salas, cientistas animados e handoffs físicos.")
         Container(glass_hud, "Glassmorphic HUD & Dashboard", "Next.js 14, Tailwind CSS, Framer Motion", "Exibe status dos agentes, matriz PRISMA, modais de auditoria e botões de aprovação.")
         Container(state_client, "Client State & BYOK Store", "Zustand / LocalStorage", "Gerencia chaves de API locais (BYOK) e estado do laboratório.")
     }
@@ -68,7 +68,7 @@ C4Container
     ContainerDb(database, "Supabase PostgreSQL", "Postgres 15 + pgvector", "Armazena checkpoints do LangGraph, metadados de artigos, matrizes PRISMA e embeddings de parágrafos.")
 
     Rel(researcher, glass_hud, "Interage e aprova checkpoints", "HTTPS")
-    Rel(researcher, spatial_ui, "Visualiza agentes trabalhando nas bancadas", "WebGL")
+    Rel(researcher, spatial_ui, "Visualiza agentes trabalhando nas salas", "Canvas 2D / 60 FPS")
     Rel(glass_hud, fastapi, "Dispara pipelines e envia decisões de HITL", "JSON / HTTPS")
     Rel(fastapi, glass_hud, "Transmite eventos dos agentes em tempo real", "Server-Sent Events (SSE)")
     Rel(fastapi, langgraph_engine, "Dispara nós de execução e comandos de retomada", "Async Python")
@@ -144,10 +144,10 @@ sequenceDiagram
     
     HUD->>Pesquisador: Ativa alarme visual no HUD + Destaca Bancada de Mineração
     HUD->>Pesquisador: Apresenta Modal de Triagem (Inclusão / Exclusão manual)
-    Pesquisador->>HUD: Exclui 12 papers irrelevantes e clica "Aprovar Triagem (30)"
+    Pesquisador->>HUD: Exclui papers fora de escopo e clica "Confirmar Artigos e Gerar Matriz"
     
-    HUD->>API: POST /api/v1/reviews/{id}/resume (artigos aprovados)
-    API->>LG: graph.aresume(thread_id, user_approval_data)
+    HUD->>API: POST /api/v1/reviews/{id}/hitl (artigos aprovados e rejeitados)
+    API->>LG: Executa human_screening_node e avança para methodologist_node
     
     Note over LG: ParserAgent segmenta Methods/Results<br/>AuditorAgent analisa rigor estatístico
     LG->>LLM: Prompt estruturado de auditoria RoB 2

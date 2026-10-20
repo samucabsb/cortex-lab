@@ -536,7 +536,7 @@ export default function CortexLabHomePage() {
               )}
             </div>
 
-            {/* Full-Width WebGL 3D Scene */}
+            {/* Laboratório Isométrico Pixel Art HD-2D (Canvas 2D) */}
             <IsometricLabCanvas
               currentStep={currentStep}
               hitlPending={hitlPending}
