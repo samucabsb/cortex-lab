@@ -2,6 +2,7 @@
 
 import React from "react";
 import { FileSpreadsheet, BookOpen } from "lucide-react";
+import { getApiBaseUrl } from "@/lib/api";
 
 interface ExportToolbarProps {
   reviewId?: string;
@@ -14,19 +15,14 @@ export const ExportToolbar: React.FC<ExportToolbarProps> = ({
   onExportCsv,
   onExportBibtex,
 }) => {
-  const getApiBase = () => {
-    const raw = (process.env.NEXT_PUBLIC_API_URL || "http://localhost:7860/api").replace(/\/+$/, "");
-    return raw.endsWith("/api") ? raw : `${raw}`;
-  };
-
   const handleCsvDownload = () => {
     if (onExportCsv) return onExportCsv();
-    window.open(`${getApiBase()}/v1/reviews/${reviewId || "current"}/export/csv`, "_blank");
+    window.open(`${getApiBaseUrl()}/v1/reviews/${reviewId || "current"}/export/csv`, "_blank");
   };
 
   const handleBibtexDownload = () => {
     if (onExportBibtex) return onExportBibtex();
-    window.open(`${getApiBase()}/v1/reviews/${reviewId || "current"}/export/bibtex`, "_blank");
+    window.open(`${getApiBaseUrl()}/v1/reviews/${reviewId || "current"}/export/bibtex`, "_blank");
   };
 
   return (

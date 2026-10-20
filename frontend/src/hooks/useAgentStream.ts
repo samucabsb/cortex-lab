@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { useLabStore } from '@/store/useLabStore';
 import { AgentBenchId } from '@/types';
+import { getApiBaseUrl } from '@/lib/api';
 
 export function useAgentStream(reviewId: string | null) {
   const eventSourceRef = useRef<EventSource | null>(null);
@@ -15,9 +16,7 @@ export function useAgentStream(reviewId: string | null) {
       return;
     }
 
-    const rawBase = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:7860/api').replace(/\/+$/, '');
-    const apiBase = rawBase.endsWith('/api') ? rawBase : `${rawBase}/api`;
-    const sseUrl = `${apiBase}/v1/reviews/${reviewId}/events`;
+    const sseUrl = `${getApiBaseUrl()}/v1/reviews/${reviewId}/events`;
 
     try {
       const eventSource = new EventSource(sseUrl);

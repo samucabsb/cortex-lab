@@ -7,13 +7,9 @@ import { KnowledgeGapsCard } from "@/components/dashboard/KnowledgeGapsCard";
 import { ExportToolbar } from "@/components/dashboard/ExportToolbar";
 import { ByokConfigModal } from "@/components/settings/ByokConfigModal";
 import {
-  MOCK_PAPERS,
-  MOCK_PRISMA_ROWS,
-  MOCK_GAPS,
-  MOCK_PICO,
-  MOCK_BOOLEAN_QUERIES,
   createReview,
   submitHitlDecision,
+  getDemoReviewData,
 } from "@/lib/api";
 import {
   AgentBenchId,
@@ -44,28 +40,21 @@ export default function CortexLabHomePage() {
   const [wizardStep, setWizardStep] = useState<WizardStep>(1);
   const [resultViewMode, setResultViewMode] = useState<"cards" | "table">("cards");
 
-  const [topic, setTopic] = useState(
-    "Eficácia e toxicidade de células CAR-T em tumores sólidos"
-  );
-  const [currentStep, setCurrentStep] = useState<string>("SCREENING_CHECKPOINT");
-  const [hitlPending, setHitlPending] = useState<boolean>(true);
-  const [selectedBenchId, setSelectedBenchId] = useState<AgentBenchId>("hitl");
+  const [topic, setTopic] = useState("");
+  const [currentStep, setCurrentStep] = useState<string>("IDLE");
+  const [hitlPending, setHitlPending] = useState<boolean>(false);
+  const [selectedBenchId, setSelectedBenchId] = useState<AgentBenchId>("coordinator");
 
-  // Scientific State
-  const [pico, setPico] = useState<PicoData>(MOCK_PICO);
-  const [booleanQueries, setBooleanQueries] = useState<string[]>(
-    MOCK_BOOLEAN_QUERIES
-  );
-  const [papers, setPapers] = useState<PaperItem[]>(MOCK_PAPERS);
-  const [selectedPaperIds, setSelectedPaperIds] = useState<Set<string>>(
-    new Set(MOCK_PAPERS.map((p) => p.id))
-  );
-  const [prismaRows, setPrismaRows] =
-    useState<PrismaMatrixItem[]>(MOCK_PRISMA_ROWS);
-  const [knowledgeGaps, setKnowledgeGaps] =
-    useState<KnowledgeGapItem[]>(MOCK_GAPS);
+  // Scientific State (Clean start, populated dynamically or via demo)
+  const [pico, setPico] = useState<PicoData | null>(null);
+  const [booleanQueries, setBooleanQueries] = useState<string[]>([]);
+  const [papers, setPapers] = useState<PaperItem[]>([]);
+  const [selectedPaperIds, setSelectedPaperIds] = useState<Set<string>>(new Set());
+  const [prismaRows, setPrismaRows] = useState<PrismaMatrixItem[]>([]);
+  const [knowledgeGaps, setKnowledgeGaps] = useState<KnowledgeGapItem[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(false);
-  const [reviewId, setReviewId] = useState<string>("rev-01");
+  const [reviewId, setReviewId] = useState<string | null>(null);
+  const [apiError, setApiError] = useState<string | null>(null);
 
   const { byok, setByokModalOpen, setReviewSession } = useLabStore();
   useAgentStream(reviewId);
@@ -77,8 +66,11 @@ export default function CortexLabHomePage() {
   ];
 
   const handleStartResearch = async (customQuery?: string) => {
-    const queryToUse = customQuery || topic;
+    const queryToUse = (customQuery || topic).trim();
+    if (!queryToUse) return;
+
     setIsLoading(true);
+    setApiError(null);
     setCurrentStep("MINING");
     setHitlPending(false);
     setSelectedBenchId("mining");
@@ -90,7 +82,7 @@ export default function CortexLabHomePage() {
       });
 
       if (res) {
-        const newRevId = res.review_id || "rev-01";
+        const newRevId = res.review_id;
         setReviewId(newRevId);
         setCurrentStep(res.status || "SCREENING_CHECKPOINT");
         setHitlPending(Boolean(res.hitl_pending));
@@ -100,9 +92,12 @@ export default function CortexLabHomePage() {
         if (res.papers?.length) {
           setPapers(res.papers);
           setSelectedPaperIds(new Set(res.papers.map((p: PaperItem) => p.id)));
+        } else {
+          setPapers([]);
+          setSelectedPaperIds(new Set());
         }
 
-        setSelectedBenchId("hitl");
+        setSelectedBenchId(res.hitl_pending ? "hitl" : "mining");
         setReviewSession({
           review_id: newRevId,
           query: queryToUse,
@@ -110,11 +105,39 @@ export default function CortexLabHomePage() {
           hitl_pending: Boolean(res.hitl_pending),
           raw_papers: res.papers || [],
         });
+        setWizardStep(2);
       }
-      setWizardStep(2);
+    } catch (err: any) {
+      console.error("[CortexLab] Erro ao iniciar pesquisa:", err);
+      setApiError(
+        err?.message || "Falha na comunicação com o backend FastAPI. Verifique se o servidor está ativo."
+      );
     } finally {
       setIsLoading(false);
     }
+  };
+
+  const handleLoadDemo = () => {
+    const demo = getDemoReviewData();
+    setTopic("Eficácia e toxicidade de células CAR-T em tumores sólidos");
+    setReviewId(demo.review_id);
+    setCurrentStep(demo.status);
+    setHitlPending(demo.hitl_pending);
+    setPico(demo.pico);
+    setBooleanQueries(demo.boolean_queries);
+    setPapers(demo.papers);
+    setSelectedPaperIds(new Set(demo.papers.map((p) => p.id)));
+    setPrismaRows(demo.prisma_matrix);
+    setKnowledgeGaps(demo.knowledge_gaps);
+    setSelectedBenchId("hitl");
+    setApiError(null);
+    setReviewSession({
+      review_id: demo.review_id,
+      query: "Eficácia e toxicidade de células CAR-T em tumores sólidos",
+      current_step: demo.status,
+      hitl_pending: demo.hitl_pending,
+      raw_papers: demo.papers,
+    });
   };
 
   const togglePaperSelection = (id: string) => {
@@ -128,12 +151,18 @@ export default function CortexLabHomePage() {
   };
 
   const handleApproveScreening = async () => {
+    if (!reviewId) {
+      setApiError("Sessão de revisão não identificada. Inicie uma pesquisa ou carregue a demonstração.");
+      return;
+    }
+
     const approvedIds = Array.from(selectedPaperIds);
     const rejectedIds = papers
       .map((p) => p.id)
       .filter((id) => !selectedPaperIds.has(id));
 
     setIsLoading(true);
+    setApiError(null);
     setCurrentStep("AUDITING");
     setSelectedBenchId("auditing");
 
@@ -147,12 +176,15 @@ export default function CortexLabHomePage() {
 
       if (res) {
         setCurrentStep(res.status || "COMPLETED");
-        setHitlPending(false);
+        setHitlPending(Boolean(res.hitl_pending));
         if (res.prisma_matrix?.length) setPrismaRows(res.prisma_matrix);
         if (res.knowledge_gaps?.length) setKnowledgeGaps(res.knowledge_gaps);
-        setSelectedBenchId("synthesis");
+        setSelectedBenchId(res.hitl_pending ? "hitl" : "synthesis");
+        setWizardStep(4);
       }
-      setWizardStep(4);
+    } catch (err: any) {
+      console.error("[CortexLab] Erro ao submeter decisão HITL:", err);
+      setApiError(err?.message || "Falha na comunicação com o backend ao submeter decisão HITL.");
     } finally {
       setIsLoading(false);
     }
@@ -174,7 +206,9 @@ export default function CortexLabHomePage() {
         return {
           badge: "Sala 01 (1 Pesquisador) • Dr. Turing — PI Coordinator",
           title: "Estrutura o protocolo PICO no quadro digital e entrega à Sala 02",
-          description: `População: ${pico.population} | Intervenção: ${pico.intervention}. Ao concluir, Dr. Turing caminha pelo corredor até a Sala 02 para entregar o protocolo à Dra. Ada.`,
+          description: pico
+            ? `População: ${pico.population} | Intervenção: ${pico.intervention}. Ao concluir, Dr. Turing caminha pelo corredor até a Sala 02 para entregar o protocolo à Dra. Ada.`
+            : "Aguarda a definição da pergunta de pesquisa para decompor em População, Intervenção, Comparador e Desfecho (PICO).",
         };
       case "mining":
         return {
@@ -291,6 +325,25 @@ export default function CortexLabHomePage() {
 
       {/* Single Focused Workspace Container */}
       <main className="flex-1 max-w-5xl w-full mx-auto px-6 py-10">
+        {/* API Error Notification */}
+        {apiError && (
+          <div className="mb-6 p-4 rounded-2xl bg-rose-50 border border-rose-200 text-rose-900 flex items-start justify-between gap-3 shadow-sm animate-in fade-in duration-200">
+            <div className="flex items-start gap-3">
+              <AlertCircle size={20} className="text-rose-600 shrink-0 mt-0.5" />
+              <div>
+                <div className="font-bold text-sm">Aviso de Comunicação com o Backend</div>
+                <div className="text-sm mt-0.5 text-rose-800">{apiError}</div>
+              </div>
+            </div>
+            <button
+              onClick={() => setApiError(null)}
+              className="px-3 py-1 text-xs font-semibold rounded-lg bg-rose-100 hover:bg-rose-200 text-rose-800 transition cursor-pointer"
+            >
+              Fechar
+            </button>
+          </div>
+        )}
+
         {/* =========================================================
             STEP 1: SUA PERGUNTA & PROTOCOLO EDITORIAL PICO
            ========================================================= */}
@@ -335,7 +388,7 @@ export default function CortexLabHomePage() {
             {/* Quick Example Pills */}
             <div className="text-center space-y-2.5">
               <p className="text-sm text-slate-500 font-medium">
-                Ou teste imediatamente com um exemplo:
+                Ou teste imediatamente com um exemplo de pesquisa real:
               </p>
               <div className="flex flex-wrap justify-center gap-2.5">
                 {quickExamples.map((ex) => (
@@ -350,10 +403,17 @@ export default function CortexLabHomePage() {
                     {ex}
                   </button>
                 ))}
+                <button
+                  onClick={handleLoadDemo}
+                  className="px-4 py-2 rounded-full bg-blue-50 border border-blue-200 hover:bg-blue-100 text-blue-800 text-sm font-semibold transition cursor-pointer shadow-sm flex items-center gap-1.5"
+                >
+                  <Sparkles size={14} className="text-blue-600" />
+                  <span>Carregar Demonstração (Pré-carregado)</span>
+                </button>
               </div>
             </div>
 
-            {/* Editorial PICO Summary Card (From Proposal 2) */}
+            {/* Editorial PICO Summary Card */}
             <div className="bg-white p-8 rounded-3xl border border-slate-200 shadow-sm space-y-6">
               <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-100 pb-4">
                 <div>
@@ -364,58 +424,78 @@ export default function CortexLabHomePage() {
                     Decomposição PICO & Estratégia de Busca
                   </h2>
                 </div>
-                <button
-                  onClick={() => setWizardStep(2)}
-                  className="px-5 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-semibold text-sm flex items-center gap-2 cursor-pointer transition"
-                >
-                  <span>Ver Laboratório Pixel Art HD-2D</span>
-                  <ArrowRight size={16} />
-                </button>
+                {pico && (
+                  <button
+                    onClick={() => setWizardStep(2)}
+                    className="px-5 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-semibold text-sm flex items-center gap-2 cursor-pointer transition"
+                  >
+                    <span>Ver Laboratório Pixel Art HD-2D</span>
+                    <ArrowRight size={16} />
+                  </button>
+                )}
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div className="p-5 rounded-2xl bg-slate-50 border border-slate-200/80">
-                  <div className="text-xs font-bold text-emerald-800 uppercase tracking-wider">
-                    População (P)
+              {pico ? (
+                <>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div className="p-5 rounded-2xl bg-slate-50 border border-slate-200/80">
+                      <div className="text-xs font-bold text-emerald-800 uppercase tracking-wider">
+                        População (P)
+                      </div>
+                      <div className="text-base text-slate-900 font-medium mt-1 leading-snug">
+                        {pico.population}
+                      </div>
+                    </div>
+                    <div className="p-5 rounded-2xl bg-slate-50 border border-slate-200/80">
+                      <div className="text-xs font-bold text-emerald-800 uppercase tracking-wider">
+                        Intervenção (I)
+                      </div>
+                      <div className="text-base text-slate-900 font-medium mt-1 leading-snug">
+                        {pico.intervention}
+                      </div>
+                    </div>
+                    <div className="p-5 rounded-2xl bg-slate-50 border border-slate-200/80">
+                      <div className="text-xs font-bold text-emerald-800 uppercase tracking-wider">
+                        Comparador (C)
+                      </div>
+                      <div className="text-base text-slate-900 font-medium mt-1 leading-snug">
+                        {pico.comparator}
+                      </div>
+                    </div>
+                    <div className="p-5 rounded-2xl bg-slate-50 border border-slate-200/80">
+                      <div className="text-xs font-bold text-emerald-800 uppercase tracking-wider">
+                        Desfechos (O)
+                      </div>
+                      <div className="text-base text-slate-900 font-medium mt-1 leading-snug">
+                        {pico.outcome}
+                      </div>
+                    </div>
                   </div>
-                  <div className="text-base text-slate-900 font-medium mt-1 leading-snug">
-                    {pico.population}
-                  </div>
-                </div>
-                <div className="p-5 rounded-2xl bg-slate-50 border border-slate-200/80">
-                  <div className="text-xs font-bold text-emerald-800 uppercase tracking-wider">
-                    Intervenção (I)
-                  </div>
-                  <div className="text-base text-slate-900 font-medium mt-1 leading-snug">
-                    {pico.intervention}
-                  </div>
-                </div>
-                <div className="p-5 rounded-2xl bg-slate-50 border border-slate-200/80">
-                  <div className="text-xs font-bold text-emerald-800 uppercase tracking-wider">
-                    Comparador (C)
-                  </div>
-                  <div className="text-base text-slate-900 font-medium mt-1 leading-snug">
-                    {pico.comparator}
-                  </div>
-                </div>
-                <div className="p-5 rounded-2xl bg-slate-50 border border-slate-200/80">
-                  <div className="text-xs font-bold text-emerald-800 uppercase tracking-wider">
-                    Desfechos (O)
-                  </div>
-                  <div className="text-base text-slate-900 font-medium mt-1 leading-snug">
-                    {pico.outcome}
-                  </div>
-                </div>
-              </div>
 
-              <div className="pt-1 space-y-2">
-                <div className="text-xs font-bold uppercase tracking-wider text-slate-400">
-                  Query Booleana Principal (OpenAlex / PubMed)
+                  {booleanQueries.length > 0 && (
+                    <div className="pt-1 space-y-2">
+                      <div className="text-xs font-bold uppercase tracking-wider text-slate-400">
+                        Query Booleana Principal (OpenAlex / PubMed)
+                      </div>
+                      <div className="p-3.5 rounded-xl bg-slate-900 text-slate-100 font-mono text-sm overflow-x-auto">
+                        {booleanQueries[0]}
+                      </div>
+                    </div>
+                  )}
+                </>
+              ) : (
+                <div className="p-8 text-center bg-slate-50 rounded-2xl border border-dashed border-slate-200 space-y-3">
+                  <p className="text-slate-600 font-medium">
+                    Nenhum protocolo gerado ainda. Digite sua pergunta acima ou carregue um exemplo demonstrativo para que o Dr. Turing decomponha a pergunta e construa as queries booleanas.
+                  </p>
+                  <button
+                    onClick={handleLoadDemo}
+                    className="px-5 py-2.5 rounded-xl bg-white border border-slate-300 hover:border-slate-400 text-slate-700 text-sm font-semibold transition cursor-pointer shadow-sm"
+                  >
+                    Carregar Demonstração (Células CAR-T)
+                  </button>
                 </div>
-                <div className="p-3.5 rounded-xl bg-slate-900 text-slate-100 font-mono text-sm overflow-x-auto">
-                  {booleanQueries[0]}
-                </div>
-              </div>
+              )}
             </div>
           </section>
         )}
@@ -435,15 +515,25 @@ export default function CortexLabHomePage() {
                 </h2>
               </div>
 
-              <button
-                onClick={() => setWizardStep(3)}
-                className="px-6 py-3.5 rounded-2xl bg-amber-500 hover:bg-amber-600 text-white font-bold text-base shadow-md transition flex items-center gap-2 cursor-pointer"
-              >
-                <span>
-                  Avançar para Aprovar Artigos ({papers.length} encontrados)
-                </span>
-                <ArrowRight size={18} />
-              </button>
+              {papers.length > 0 ? (
+                <button
+                  onClick={() => setWizardStep(3)}
+                  className="px-6 py-3.5 rounded-2xl bg-amber-500 hover:bg-amber-600 text-white font-bold text-base shadow-md transition flex items-center gap-2 cursor-pointer"
+                >
+                  <span>
+                    Avançar para Aprovar Artigos ({papers.length} encontrados)
+                  </span>
+                  <ArrowRight size={18} />
+                </button>
+              ) : (
+                <button
+                  onClick={() => setWizardStep(1)}
+                  className="px-6 py-3.5 rounded-2xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-base shadow-md transition flex items-center gap-2 cursor-pointer"
+                >
+                  <span>Definir Pergunta na Etapa 1</span>
+                  <ArrowRight size={18} />
+                </button>
+              )}
             </div>
 
             {/* Full-Width WebGL 3D Scene */}
@@ -469,12 +559,21 @@ export default function CortexLabHomePage() {
                 </p>
               </div>
 
-              <button
-                onClick={() => setWizardStep(3)}
-                className="px-6 py-3.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-semibold text-base shrink-0 cursor-pointer transition"
-              >
-                Revisar os {papers.length} Artigos →
-              </button>
+              {papers.length > 0 ? (
+                <button
+                  onClick={() => setWizardStep(3)}
+                  className="px-6 py-3.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-semibold text-base shrink-0 cursor-pointer transition"
+                >
+                  Revisar os {papers.length} Artigos →
+                </button>
+              ) : (
+                <button
+                  onClick={() => setWizardStep(1)}
+                  className="px-6 py-3.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-semibold text-base shrink-0 cursor-pointer transition"
+                >
+                  Definir Pergunta na Etapa 1 →
+                </button>
+              )}
             </div>
           </section>
         )}
@@ -497,110 +596,140 @@ export default function CortexLabHomePage() {
                 </p>
               </div>
 
-              <button
-                onClick={handleApproveScreening}
-                disabled={isLoading || selectedPaperIds.size === 0}
-                className="px-7 py-4 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-base shadow-md transition flex items-center gap-2 cursor-pointer disabled:opacity-50"
-              >
-                <CheckCircle2 size={18} />
-                <span>
-                  {isLoading
-                    ? "Auditando Artigos..."
-                    : `Confirmar ${selectedPaperIds.size} Artigos e Gerar Matriz →`}
-                </span>
-              </button>
+              {papers.length > 0 && (
+                <button
+                  onClick={handleApproveScreening}
+                  disabled={isLoading || selectedPaperIds.size === 0}
+                  className="px-7 py-4 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-base shadow-md transition flex items-center gap-2 cursor-pointer disabled:opacity-50"
+                >
+                  <CheckCircle2 size={18} />
+                  <span>
+                    {isLoading
+                      ? "Auditando Artigos..."
+                      : `Confirmar ${selectedPaperIds.size} Artigos e Gerar Matriz →`}
+                  </span>
+                </button>
+              )}
             </div>
 
-            {/* Selection Controls */}
-            <div className="flex items-center justify-between text-sm text-slate-600">
-              <span className="font-semibold">
-                {selectedPaperIds.size} de {papers.length} estudos selecionados para inclusão
-              </span>
-              <div className="flex items-center gap-3">
-                <button
-                  onClick={() =>
-                    setSelectedPaperIds(new Set(papers.map((p) => p.id)))
-                  }
-                  className="text-blue-600 hover:underline font-semibold cursor-pointer"
-                >
-                  Marcar Todos
-                </button>
-                <span>•</span>
-                <button
-                  onClick={() => setSelectedPaperIds(new Set())}
-                  className="text-slate-500 hover:underline font-medium cursor-pointer"
-                >
-                  Desmarcar Todos
-                </button>
-              </div>
-            </div>
-
-            {/* Large Selectable Article Cards */}
-            <div className="space-y-4">
-              {papers.map((paper) => {
-                const isSelected = selectedPaperIds.has(paper.id);
-                return (
-                  <div
-                    key={paper.id}
-                    onClick={() => togglePaperSelection(paper.id)}
-                    className={`p-6 rounded-2xl bg-white border-2 transition cursor-pointer ${
-                      isSelected
-                        ? "border-blue-600 shadow-sm"
-                        : "border-slate-200 opacity-60 hover:opacity-90"
-                    }`}
+            {papers.length === 0 ? (
+              <div className="p-12 text-center bg-white rounded-3xl border border-slate-200 space-y-4">
+                <AlertCircle size={40} className="mx-auto text-slate-400" />
+                <h3 className="serif-title text-2xl font-bold text-slate-900">
+                  Nenhum artigo minerado ainda
+                </h3>
+                <p className="text-slate-600 max-w-md mx-auto">
+                  Inicie uma pesquisa na Etapa 1 ou carregue o exemplo demonstrativo para revisar artigos na triagem humana.
+                </p>
+                <div className="flex justify-center gap-3 pt-2">
+                  <button
+                    onClick={() => setWizardStep(1)}
+                    className="px-5 py-2.5 rounded-xl bg-slate-900 text-white font-semibold text-sm cursor-pointer"
                   >
-                    <div className="flex items-start gap-4">
-                      <input
-                        type="checkbox"
-                        checked={isSelected}
-                        onChange={() => {}}
-                        className="w-5 h-5 mt-1.5 accent-blue-600 cursor-pointer shrink-0"
-                      />
-                      <div className="space-y-2 flex-1">
-                        <div className="flex flex-wrap items-center justify-between gap-2">
-                          <div className="flex flex-wrap items-center gap-2.5">
-                            <span className="px-3 py-1 rounded-lg bg-blue-50 text-blue-800 font-semibold text-xs border border-blue-200">
-                              {paper.journal || "Periódico Científico"} •{" "}
-                              {paper.year || 2024}
-                            </span>
-                            <span className="px-2.5 py-0.5 rounded-md bg-slate-100 text-slate-600 text-xs font-medium">
-                              Fonte: {paper.source_api}
-                            </span>
-                          </div>
-
-                          {paper.doi && (
-                            <a
-                              href={`https://doi.org/${paper.doi}`}
-                              target="_blank"
-                              rel="noreferrer"
-                              onClick={(e) => e.stopPropagation()}
-                              className="text-xs font-mono text-blue-600 hover:underline inline-flex items-center gap-1"
-                            >
-                              <span>DOI: {paper.doi}</span>
-                              <ExternalLink size={12} />
-                            </a>
-                          )}
-                        </div>
-
-                        <h3 className="text-xl font-bold text-slate-900 leading-snug">
-                          {paper.title}
-                        </h3>
-
-                        <div className="text-sm text-slate-500 font-medium">
-                          Autores: {paper.authors.join(", ")}
-                        </div>
-
-                        {paper.abstract && (
-                          <p className="text-base text-slate-600 leading-relaxed pt-1">
-                            {paper.abstract}
-                          </p>
-                        )}
-                      </div>
-                    </div>
+                    Ir para Etapa 1
+                  </button>
+                  <button
+                    onClick={handleLoadDemo}
+                    className="px-5 py-2.5 rounded-xl bg-white border border-slate-300 text-slate-700 font-semibold text-sm cursor-pointer hover:bg-slate-50"
+                  >
+                    Carregar Demonstração
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <>
+                {/* Selection Controls */}
+                <div className="flex items-center justify-between text-sm text-slate-600">
+                  <span className="font-semibold">
+                    {selectedPaperIds.size} de {papers.length} estudos selecionados para inclusão
+                  </span>
+                  <div className="flex items-center gap-3">
+                    <button
+                      onClick={() =>
+                        setSelectedPaperIds(new Set(papers.map((p) => p.id)))
+                      }
+                      className="text-blue-600 hover:underline font-semibold cursor-pointer"
+                    >
+                      Marcar Todos
+                    </button>
+                    <span>•</span>
+                    <button
+                      onClick={() => setSelectedPaperIds(new Set())}
+                      className="text-slate-500 hover:underline font-medium cursor-pointer"
+                    >
+                      Desmarcar Todos
+                    </button>
                   </div>
-                );
-              })}
-            </div>
+                </div>
+
+                {/* Large Selectable Article Cards */}
+                <div className="space-y-4">
+                  {papers.map((paper) => {
+                    const isSelected = selectedPaperIds.has(paper.id);
+                    return (
+                      <div
+                        key={paper.id}
+                        onClick={() => togglePaperSelection(paper.id)}
+                        className={`p-6 rounded-2xl bg-white border-2 transition cursor-pointer ${
+                          isSelected
+                            ? "border-blue-600 shadow-sm"
+                            : "border-slate-200 opacity-60 hover:opacity-90"
+                        }`}
+                      >
+                        <div className="flex items-start gap-4">
+                          <input
+                            type="checkbox"
+                            checked={isSelected}
+                            onChange={() => {}}
+                            className="w-5 h-5 mt-1.5 accent-blue-600 cursor-pointer shrink-0"
+                          />
+                          <div className="space-y-2 flex-1">
+                            <div className="flex flex-wrap items-center justify-between gap-2">
+                              <div className="flex flex-wrap items-center gap-2.5">
+                                <span className="px-3 py-1 rounded-lg bg-blue-50 text-blue-800 font-semibold text-xs border border-blue-200">
+                                  {paper.journal || "Periódico Científico"} •{" "}
+                                  {paper.year || 2024}
+                                </span>
+                                <span className="px-2.5 py-0.5 rounded-md bg-slate-100 text-slate-600 text-xs font-medium">
+                                  Fonte: {paper.source_api}
+                                </span>
+                              </div>
+
+                              {paper.doi && (
+                                <a
+                                  href={`https://doi.org/${paper.doi}`}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  onClick={(e) => e.stopPropagation()}
+                                  className="text-xs font-mono text-blue-600 hover:underline inline-flex items-center gap-1"
+                                >
+                                  <span>DOI: {paper.doi}</span>
+                                  <ExternalLink size={12} />
+                                </a>
+                              )}
+                            </div>
+
+                            <h3 className="text-xl font-bold text-slate-900 leading-snug">
+                              {paper.title}
+                            </h3>
+
+                            <div className="text-sm text-slate-500 font-medium">
+                              Autores: {paper.authors.join(", ")}
+                            </div>
+
+                            {paper.abstract && (
+                              <p className="text-base text-slate-600 leading-relaxed pt-1">
+                                {paper.abstract}
+                              </p>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </>
+            )}
           </section>
         )}
 
@@ -623,140 +752,168 @@ export default function CortexLabHomePage() {
                 </p>
               </div>
 
-              <ExportToolbar reviewId={reviewId} />
+              {prismaRows.length > 0 && <ExportToolbar reviewId={reviewId || undefined} />}
             </div>
 
-            {/* View Mode Toggle: Detailed Study Cards (Proposal 1) vs Clean Editorial Table (Proposal 2) */}
-            <div className="space-y-5">
-              <div className="flex flex-wrap items-center justify-between gap-3">
+            {prismaRows.length === 0 ? (
+              <div className="p-12 text-center bg-white rounded-3xl border border-slate-200 space-y-4">
+                <AlertCircle size={40} className="mx-auto text-slate-400" />
                 <h3 className="serif-title text-2xl font-bold text-slate-900">
-                  Estudos Incluídos e Auditados
+                  Nenhum estudo auditado na Matriz PRISMA ainda
                 </h3>
-
-                <div className="inline-flex items-center bg-slate-200/70 p-1 rounded-xl">
+                <p className="text-slate-600 max-w-md mx-auto">
+                  Complete as etapas anteriores (Busca e Triagem Humana) para que o Agente Metodologista audite o risco de viés e gere a síntese final.
+                </p>
+                <div className="flex justify-center gap-3 pt-2">
                   <button
-                    onClick={() => setResultViewMode("cards")}
-                    className={`px-3.5 py-1.5 rounded-lg text-sm font-semibold flex items-center gap-2 transition cursor-pointer ${
-                      resultViewMode === "cards"
-                        ? "bg-white text-slate-900 shadow-sm"
-                        : "text-slate-600 hover:text-slate-900"
-                    }`}
+                    onClick={() => setWizardStep(1)}
+                    className="px-5 py-2.5 rounded-xl bg-slate-900 text-white font-semibold text-sm cursor-pointer hover:bg-slate-800 transition"
                   >
-                    <LayoutGrid size={15} />
-                    <span>Fichas Detalhadas</span>
+                    Iniciar Nova Revisão
                   </button>
                   <button
-                    onClick={() => setResultViewMode("table")}
-                    className={`px-3.5 py-1.5 rounded-lg text-sm font-semibold flex items-center gap-2 transition cursor-pointer ${
-                      resultViewMode === "table"
-                        ? "bg-white text-slate-900 shadow-sm"
-                        : "text-slate-600 hover:text-slate-900"
-                    }`}
+                    onClick={handleLoadDemo}
+                    className="px-5 py-2.5 rounded-xl bg-white border border-slate-300 text-slate-700 font-semibold text-sm cursor-pointer hover:bg-slate-50 transition"
                   >
-                    <Table2 size={15} />
-                    <span>Tabela Comparativa</span>
+                    Carregar Demonstração Completa
                   </button>
                 </div>
               </div>
-
-              {resultViewMode === "cards" ? (
+            ) : (
+              <>
+                {/* View Mode Toggle: Detailed Study Cards vs Clean Editorial Table */}
                 <div className="space-y-5">
-                  {prismaRows.map((row) => (
-                    <div
-                      key={row.paper_id}
-                      className="bg-white p-7 rounded-3xl border border-slate-200 shadow-sm space-y-5"
-                    >
-                      <div className="flex flex-wrap items-center justify-between gap-3">
-                        <div className="flex flex-wrap items-center gap-3">
-                          <span className="text-xl font-extrabold text-blue-700">
-                            {row.citation_key}
-                          </span>
-                          <span className="px-3 py-1 rounded-full bg-slate-100 text-slate-700 font-semibold text-xs border border-slate-200">
-                            {row.journal || "Periódico"} • Qualis{" "}
-                            {row.qualis_capes || "A1"} ({row.sjr_quartile || "Q1"})
-                          </span>
-                          <a
-                            href={`https://doi.org/${row.doi}`}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="text-xs font-mono text-slate-500 hover:text-blue-600 inline-flex items-center gap-1"
-                          >
-                            <span>DOI: {row.doi}</span>
-                            <ExternalLink size={12} />
-                          </a>
-                        </div>
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <h3 className="serif-title text-2xl font-bold text-slate-900">
+                      Estudos Incluídos e Auditados
+                    </h3>
 
-                        {row.risk_of_bias === "LOW" ? (
-                          <span className="px-4 py-1.5 rounded-full bg-emerald-50 text-emerald-800 border border-emerald-200 font-bold text-xs inline-flex items-center gap-1.5">
-                            <CheckCircle2 size={14} className="text-emerald-600" />
-                            Baixo Risco de Viés (RoB 2)
-                          </span>
-                        ) : row.risk_of_bias === "HIGH" ? (
-                          <span className="px-4 py-1.5 rounded-full bg-rose-50 text-rose-800 border border-rose-200 font-bold text-xs inline-flex items-center gap-1.5">
-                            <AlertCircle size={14} className="text-rose-600" />
-                            Alto Risco de Viés (RoB 2)
-                          </span>
-                        ) : (
-                          <span className="px-4 py-1.5 rounded-full bg-amber-50 text-amber-800 border border-amber-200 font-bold text-xs inline-flex items-center gap-1.5">
-                            <AlertCircle size={14} className="text-amber-600" />
-                            Algumas Preocupações (RoB 2)
-                          </span>
-                        )}
-                      </div>
-
-                      <h4 className="text-xl font-bold text-slate-900 leading-snug">
-                        {row.title}
-                      </h4>
-
-                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                        <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200/70">
-                          <div className="text-xs font-bold uppercase text-slate-500">
-                            Amostra (População)
-                          </div>
-                          <div className="text-lg font-bold text-slate-900 mt-1">
-                            {row.population_n || "N/A"}
-                          </div>
-                        </div>
-                        <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200/70">
-                          <div className="text-xs font-bold uppercase text-slate-500">
-                            Intervenção & Controle
-                          </div>
-                          <div className="text-sm font-semibold text-slate-900 mt-1 leading-snug">
-                            {row.intervention} vs. {row.comparator}
-                          </div>
-                        </div>
-                        <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200/70">
-                          <div className="text-xs font-bold uppercase text-slate-500">
-                            Desfecho Estatístico
-                          </div>
-                          <div className="text-sm font-semibold text-emerald-800 mt-1 leading-snug">
-                            {row.outcomes}
-                          </div>
-                        </div>
-                      </div>
-
-                      <div className="p-4 rounded-2xl bg-blue-50/50 border border-blue-100 flex items-start gap-3 text-sm text-slate-700 italic">
-                        <Quote
-                          size={16}
-                          className="text-blue-600 shrink-0 mt-0.5"
-                        />
-                        <div>
-                          <strong className="not-italic text-slate-900">
-                            Trecho Original Rastreado (p. {row.page_reference || 1}):{" "}
-                          </strong>
-                          {row.traceable_quote}
-                        </div>
-                      </div>
+                    <div className="inline-flex items-center bg-slate-200/70 p-1 rounded-xl">
+                      <button
+                        onClick={() => setResultViewMode("cards")}
+                        className={`px-3.5 py-1.5 rounded-lg text-sm font-semibold flex items-center gap-2 transition cursor-pointer ${
+                          resultViewMode === "cards"
+                            ? "bg-white text-slate-900 shadow-sm"
+                            : "text-slate-600 hover:text-slate-900"
+                        }`}
+                      >
+                        <LayoutGrid size={15} />
+                        <span>Fichas Detalhadas</span>
+                      </button>
+                      <button
+                        onClick={() => setResultViewMode("table")}
+                        className={`px-3.5 py-1.5 rounded-lg text-sm font-semibold flex items-center gap-2 transition cursor-pointer ${
+                          resultViewMode === "table"
+                            ? "bg-white text-slate-900 shadow-sm"
+                            : "text-slate-600 hover:text-slate-900"
+                        }`}
+                      >
+                        <Table2 size={15} />
+                        <span>Tabela Comparativa</span>
+                      </button>
                     </div>
-                  ))}
-                </div>
-              ) : (
-                <PrismaMatrixTable rows={prismaRows} />
-              )}
-            </div>
+                  </div>
 
-            {/* Knowledge Gaps Section */}
-            <KnowledgeGapsCard gaps={knowledgeGaps} />
+                  {resultViewMode === "cards" ? (
+                    <div className="space-y-5">
+                      {prismaRows.map((row) => (
+                        <div
+                          key={row.paper_id}
+                          className="bg-white p-7 rounded-3xl border border-slate-200 shadow-sm space-y-5"
+                        >
+                          <div className="flex flex-wrap items-center justify-between gap-3">
+                            <div className="flex flex-wrap items-center gap-3">
+                              <span className="text-xl font-extrabold text-blue-700">
+                                {row.citation_key}
+                              </span>
+                              <span className="px-3 py-1 rounded-full bg-slate-100 text-slate-700 font-semibold text-xs border border-slate-200">
+                                {row.journal || "Periódico"} • Qualis{" "}
+                                {row.qualis_capes || "A1"} ({row.sjr_quartile || "Q1"})
+                              </span>
+                              <a
+                                href={`https://doi.org/${row.doi}`}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="text-xs font-mono text-slate-500 hover:text-blue-600 inline-flex items-center gap-1"
+                              >
+                                <span>DOI: {row.doi}</span>
+                                <ExternalLink size={12} />
+                              </a>
+                            </div>
+
+                            {row.risk_of_bias === "LOW" ? (
+                              <span className="px-4 py-1.5 rounded-full bg-emerald-50 text-emerald-800 border border-emerald-200 font-bold text-xs inline-flex items-center gap-1.5">
+                                <CheckCircle2 size={14} className="text-emerald-600" />
+                                Baixo Risco de Viés (RoB 2)
+                              </span>
+                            ) : row.risk_of_bias === "HIGH" ? (
+                              <span className="px-4 py-1.5 rounded-full bg-rose-50 text-rose-800 border border-rose-200 font-bold text-xs inline-flex items-center gap-1.5">
+                                <AlertCircle size={14} className="text-rose-600" />
+                                Alto Risco de Viés (RoB 2)
+                              </span>
+                            ) : (
+                              <span className="px-4 py-1.5 rounded-full bg-amber-50 text-amber-800 border border-amber-200 font-bold text-xs inline-flex items-center gap-1.5">
+                                <AlertCircle size={14} className="text-amber-600" />
+                                Algumas Preocupações (RoB 2)
+                              </span>
+                            )}
+                          </div>
+
+                          <h4 className="text-xl font-bold text-slate-900 leading-snug">
+                            {row.title}
+                          </h4>
+
+                          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                            <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200/70">
+                              <div className="text-xs font-bold uppercase text-slate-500">
+                                Amostra (População)
+                              </div>
+                              <div className="text-lg font-bold text-slate-900 mt-1">
+                                {row.population_n || "N/A"}
+                              </div>
+                            </div>
+                            <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200/70">
+                              <div className="text-xs font-bold uppercase text-slate-500">
+                                Intervenção & Controle
+                              </div>
+                              <div className="text-sm font-semibold text-slate-900 mt-1 leading-snug">
+                                {row.intervention} vs. {row.comparator}
+                              </div>
+                            </div>
+                            <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200/70">
+                              <div className="text-xs font-bold uppercase text-slate-500">
+                                Desfecho Estatístico
+                              </div>
+                              <div className="text-sm font-semibold text-emerald-800 mt-1 leading-snug">
+                                {row.outcomes}
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="p-4 rounded-2xl bg-blue-50/50 border border-blue-100 flex items-start gap-3 text-sm text-slate-700 italic">
+                            <Quote
+                              size={16}
+                              className="text-blue-600 shrink-0 mt-0.5"
+                            />
+                            <div>
+                              <strong className="not-italic text-slate-900">
+                                Trecho Original Rastreado (p. {row.page_reference || 1}):{" "}
+                              </strong>
+                              {row.traceable_quote}
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <PrismaMatrixTable rows={prismaRows} />
+                  )}
+                </div>
+
+                {/* Knowledge Gaps Section */}
+                <KnowledgeGapsCard gaps={knowledgeGaps} />
+              </>
+            )}
           </section>
         )}
       </main>

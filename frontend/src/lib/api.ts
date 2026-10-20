@@ -5,8 +5,10 @@ import {
   PicoData,
 } from "@/types";
 
-const API_BASE_URL =
-  process.env.NEXT_PUBLIC_API_URL || "http://localhost:7860/api";
+export function getApiBaseUrl(): string {
+  const raw = (process.env.NEXT_PUBLIC_API_URL || "http://localhost:7860").replace(/\/+$/, "");
+  return raw.endsWith("/api") ? raw : `${raw}/api`;
+}
 
 export const MOCK_PICO: PicoData = {
   population:
@@ -220,46 +222,24 @@ export async function createReview(
   topic: string,
   options: CreateReviewOptions = {}
 ) {
-  try {
-    const response = await fetch(`${API_BASE_URL}/v1/reviews`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        topic,
-        inclusion_criteria: options.inclusionCriteria || [],
-        exclusion_criteria: options.exclusionCriteria || [],
-        byok_gemini_key: options.byokGeminiKey || undefined,
-        byok_groq_key: options.byokGroqKey || undefined,
-      }),
-    });
+  const baseUrl = getApiBaseUrl();
+  const response = await fetch(`${baseUrl}/v1/reviews`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      topic,
+      inclusion_criteria: options.inclusionCriteria || [],
+      exclusion_criteria: options.exclusionCriteria || [],
+      byok_gemini_key: options.byokGeminiKey || undefined,
+      byok_groq_key: options.byokGroqKey || undefined,
+    }),
+  });
 
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`);
-    }
-    return await response.json();
-  } catch (error) {
-    console.info(
-      "[CortexLab API] Backend offline or unreachable, using realistic scientific fallback data."
-    );
-    return {
-      review_id: "rev-demo",
-      status: "SCREENING_CHECKPOINT",
-      pico: {
-        ...MOCK_PICO,
-        intervention: `Protocolo investigado em '${topic}'`,
-      },
-      boolean_queries: [
-        `("${topic}") AND (randomized controlled trial OR systematic review)`,
-        `("${topic}"[Title/Abstract]) AND (control OR comparator) AND (efficacy)`,
-        `("${topic}") AND (OpenAlex OR PubMed OR Europe PMC)`,
-      ],
-      hitl_pending: true,
-      hitl_checkpoint: "screening",
-      message: `MinerAgent recuperou e validou ${MOCK_PAPERS.length} artigos científicos para '${topic}'. Aguardando triagem humana.`,
-      papers_found: MOCK_PAPERS.length,
-      papers: MOCK_PAPERS,
-    };
+  if (!response.ok) {
+    const errorBody = await response.text().catch(() => "");
+    throw new Error(`Falha no servidor da API (HTTP ${response.status}): ${errorBody || response.statusText}`);
   }
+  return await response.json();
 }
 
 export async function submitHitlDecision(
@@ -269,41 +249,46 @@ export async function submitHitlDecision(
   rejectedPaperIds: string[],
   notes: string = ""
 ) {
-  try {
-    const response = await fetch(`${API_BASE_URL}/v1/reviews/${reviewId}/hitl`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        review_id: reviewId,
-        step_checkpoint: stepCheckpoint,
-        action: "APPROVE",
-        approved_paper_ids: approvedPaperIds,
-        rejected_paper_ids: rejectedPaperIds,
-        notes,
-      }),
-    });
-
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`);
-    }
-    return await response.json();
-  } catch (error) {
-    console.info(
-      "[CortexLab API] Backend offline during HITL decision, returning synthesized fallback matrix."
-    );
-    const filteredMatrix = MOCK_PRISMA_ROWS.filter(
-      (r) => !rejectedPaperIds.includes(r.paper_id)
-    );
-    return {
+  const baseUrl = getApiBaseUrl();
+  const response = await fetch(`${baseUrl}/v1/reviews/${reviewId}/hitl`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
       review_id: reviewId,
-      status: "COMPLETED",
-      hitl_pending: false,
-      hitl_checkpoint: null,
-      message: `Auditoria RoB 2 e Síntese PRISMA 2020 concluídas para ${filteredMatrix.length} estudos aprovados.`,
-      audited_papers: filteredMatrix,
-      matrix_rows: filteredMatrix.length,
-      prisma_matrix: filteredMatrix,
-      knowledge_gaps: MOCK_GAPS,
-    };
+      step_checkpoint: stepCheckpoint,
+      action: "APPROVE",
+      approved_paper_ids: approvedPaperIds,
+      rejected_paper_ids: rejectedPaperIds,
+      notes,
+    }),
+  });
+
+  if (!response.ok) {
+    const errorBody = await response.text().catch(() => "");
+    throw new Error(`Falha na validação HITL (HTTP ${response.status}): ${errorBody || response.statusText}`);
   }
+  return await response.json();
 }
+
+/**
+ * Returns clean reference demo data explicitly for demonstration and UI testing purposes.
+ */
+export function getDemoReviewData(topic: string = "Eficácia e toxicidade de células CAR-T em tumores sólidos") {
+  return {
+    review_id: "demo-cart-cells",
+    status: "SCREENING_CHECKPOINT",
+    pico: {
+      ...MOCK_PICO,
+      intervention: `Protocolo investigado para '${topic}'`,
+    },
+    boolean_queries: MOCK_BOOLEAN_QUERIES,
+    hitl_pending: true,
+    hitl_checkpoint: "screening" as const,
+    message: `[Modo Demonstração] Carregados ${MOCK_PAPERS.length} artigos científicos para teste do fluxo e do Laboratório Pixel Art.`,
+    papers_found: MOCK_PAPERS.length,
+    papers: MOCK_PAPERS,
+    prisma_matrix: MOCK_PRISMA_ROWS,
+    knowledge_gaps: MOCK_GAPS,
+  };
+}
+
