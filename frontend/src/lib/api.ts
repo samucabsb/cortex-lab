@@ -184,3 +184,22 @@ export function getCsvExportUrl(reviewId: string): string {
 export function getBibtexExportUrl(reviewId: string): string {
   return `${getApiBaseUrl()}/v1/reviews/${reviewId}/export/bibtex`;
 }
+
+export async function translatePapers(
+  items: Array<{ id: string; title: string; abstract?: string }>,
+  targetLang: string = 'pt'
+): Promise<Record<string, { title_pt: string; abstract_pt: string }>> {
+  const baseUrl = getApiBaseUrl();
+  const resp = await fetch(`${baseUrl}/v1/translate`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ items, target_lang: targetLang }),
+  });
+
+  if (!resp.ok) {
+    throw new Error(`Falha ao traduzir textos (HTTP ${resp.status})`);
+  }
+  const data = await resp.json();
+  return data.translations || {};
+}
+

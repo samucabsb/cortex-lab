@@ -195,13 +195,16 @@ export const PrismaMatrixTable: React.FC<PrismaMatrixTableProps> = ({
                     </a>
                   )}
                   <div className="flex items-center gap-1 mt-1.5">
-                    <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-slate-100 text-slate-700 border border-slate-200">
-                      <Award size={10} className="text-blue-600" />
-                      Qualis {row.qualis_capes || "A1"}
-                    </span>
-                    <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-blue-50 text-blue-700 border border-blue-200">
-                      {row.sjr_quartile || "Q1"}
-                    </span>
+                    {row.doi_status === "verified" ? (
+                      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                        <ShieldCheck size={10} className="text-emerald-600" />
+                        Crossref Validado
+                      </span>
+                    ) : (
+                      <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-slate-100 text-slate-600 border border-slate-200">
+                        DOI: {row.doi_status || "unchecked"}
+                      </span>
+                    )}
                   </div>
                 </td>
 

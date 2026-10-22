@@ -10,6 +10,20 @@
   --font-mono: 'JetBrains Mono', monospace;
 }
 
+html {
+  scroll-behavior: smooth;
+  font-size: 16px;
+  transition: font-size 0.15s ease;
+}
+
+html[data-font-scale='large'] {
+  font-size: 17.5px;
+}
+
+html[data-font-scale='xlarge'] {
+  font-size: 19px;
+}
+
 body {
   background-color: #FAF9F6;
   color: #0f172a;
@@ -19,8 +33,42 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
+/* Alto Contraste Acadêmico (WCAG AAA) */
+html[data-high-contrast='true'] body {
+  background-color: #FFFFFF !important;
+  color: #000000 !important;
+}
+
+html[data-high-contrast='true'] .a11y-card {
+  background-color: #FFFFFF !important;
+  border-color: #0f172a !important;
+  border-width: 2px !important;
+}
+
+/* Foco de Teclado Nítido (WCAG 2.4.7) */
+*:focus-visible {
+  outline: 2px solid #1D4ED8;
+  outline-offset: 2px;
+}
+
 .serif-title {
   font-family: var(--font-serif);
+}
+
+/* Transições suaves e contínuas entre seções (Zero cortes bruscos) */
+@keyframes stageFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.stage-enter {
+  animation: stageFadeIn 0.35s cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
 /* Editorial Minimalist Scrollbar */
@@ -40,4 +88,293 @@ body {
 
 ::-webkit-scrollbar-thumb:hover {
   background: #94a3b8;
+}
+
+/* =========================================================================
+   SALA DOS AGENTES EM PIXEL ART VETORIAL (SVG ASCII-to-Path)
+   Inspirado em AiOperationsRoom & Grupo 1 ResIA — Edição Deluxe Animada
+   ========================================================================= */
+
+.cortex-sala {
+  position: relative;
+  background: #FFFFFF;
+  border: 1px solid #E2E8F0;
+  border-radius: 20px;
+  padding: 1.25rem;
+  box-shadow: 0 4px 20px -2px rgba(15, 23, 42, 0.05);
+  transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.cortex-sala-cena {
+  position: relative;
+  width: 100%;
+  margin: 0 auto;
+  border-radius: 14px;
+  overflow: hidden;
+  background: #F3ECE2;
+  border: 2px solid #D8C8B4;
+  box-shadow: inset 0 2px 6px rgba(74, 52, 38, 0.08);
+}
+
+.cortex-sala-cena svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  shape-rendering: crispEdges;
+}
+
+.cortex-sala .pessoa {
+  cursor: pointer;
+  transition: filter 0.15s ease;
+}
+
+.cortex-sala .pessoa:hover,
+.cortex-sala .pessoa:focus-visible {
+  filter: drop-shadow(0 -1px 0 #FFFDF8) drop-shadow(0 1px 0 #2B2024);
+  outline: none;
+}
+
+.cortex-sala .pessoa[data-selecionado='true'] {
+  filter: drop-shadow(0 0 2px #2563EB);
+}
+
+/* Respiração suave quando parado para dar vida contínua à cena */
+.cortex-sala .pessoa[data-pose='parado'] .corpo {
+  animation: pixel-respirar 2.6s steps(2) infinite;
+}
+
+/* Balão flutuante HTML sobre a cena */
+.fala-balao-html {
+  --ancora: 75%;
+  display: none;
+  position: absolute;
+  left: var(--x);
+  bottom: var(--y);
+  transform: translate(calc(-1 * var(--ancora)), -8px);
+  padding: 0.35em 0.75em;
+  font-size: clamp(0.65rem, 1.3vw, 0.82rem);
+  font-weight: 700;
+  line-height: 1.2;
+  white-space: nowrap;
+  color: #5B3256;
+  background: #FFFDF8;
+  border: 2px solid #2B2024;
+  border-radius: 6px;
+  box-shadow: 2px 2px 0 rgba(43, 32, 36, 0.22);
+  z-index: 10;
+  pointer-events: none;
+}
+
+.fala-balao-html::after,
+.fala-balao-html::before {
+  content: '';
+  position: absolute;
+  left: var(--ancora);
+  top: 100%;
+  border-style: solid;
+  border-color: transparent;
+  transform: translateX(-50%);
+}
+
+.fala-balao-html::before {
+  border-width: 8px 7px 0;
+  border-top-color: #2B2024;
+}
+
+.fala-balao-html::after {
+  border-width: 5px 4px 0;
+  border-top-color: #FFFDF8;
+}
+
+.cortex-sala[data-dossie='fechado'] .fala-balao-html[data-tipo='concluido'],
+.cortex-sala[data-alerta='screening'] .fala-balao-html[data-tipo='screening'],
+.cortex-sala[data-alerta='bias'] .fala-balao-html[data-tipo='bias'] {
+  display: block;
+  animation: pixel-surgir 0.36s steps(3) both;
+}
+
+.cortex-sala[data-dossie='fechado'] .pessoa[data-id='rosalind'] .selo {
+  display: none;
+}
+
+@keyframes pixel-surgir {
+  from {
+    opacity: 0;
+    transform: translate(calc(-1 * var(--ancora)), 0);
+  }
+  to {
+    opacity: 1;
+    transform: translate(calc(-1 * var(--ancora)), -8px);
+  }
+}
+
+/* Controle de quadros dos sprites SVG */
+.cortex-sala .q,
+.cortex-sala .piscar,
+.cortex-sala .papel-na-mao,
+.cortex-sala .balao,
+.cortex-sala .selo,
+.cortex-sala .pasta-fechada,
+.cortex-sala .brilhos {
+  display: none;
+}
+
+.cortex-sala .pessoa[data-pose='parado'] .q-parado,
+.cortex-sala .pessoa[data-pose='andando'] .q-parado,
+.cortex-sala .pessoa[data-pose='andando'] .q-andar,
+.cortex-sala .pessoa[data-pose='digitando'] .q-digitarA,
+.cortex-sala .pessoa[data-pose='digitando'] .q-digitarB {
+  display: inline;
+}
+
+.cortex-sala .pessoa[data-pose='andando'] .q-parado,
+.cortex-sala .pessoa[data-pose='digitando'] .q-digitarA {
+  animation: pixel-quadro-a 0.36s steps(1) infinite;
+}
+
+.cortex-sala .pessoa[data-pose='andando'] .q-andar,
+.cortex-sala .pessoa[data-pose='digitando'] .q-digitarB {
+  visibility: hidden;
+  animation: pixel-quadro-b 0.36s steps(1) infinite;
+}
+
+.cortex-sala .pessoa:not([data-pose='andando']) .piscar {
+  display: inline;
+  visibility: hidden;
+  animation: pixel-piscar 3.8s steps(1) infinite;
+}
+
+.cortex-sala .carregando .papel-na-mao {
+  display: inline;
+}
+
+.cortex-sala .pessoa[data-fase='trabalhando'] .balao {
+  display: inline;
+  animation: pixel-flutuar 0.9s steps(2) infinite;
+}
+
+.cortex-sala .pessoa[data-selo='ok'] .selo-ok,
+.cortex-sala .pessoa[data-selo='aviso'] .selo-aviso,
+.cortex-sala .pessoa[data-selo='erro'] .selo-erro {
+  display: inline;
+  animation: pixel-flutuar 1.6s steps(2) infinite;
+}
+
+.cortex-sala[data-dossie='fechado'] .pasta-aberta,
+.cortex-sala[data-dossie='fechado'] .pilha {
+  display: none;
+}
+
+.cortex-sala[data-dossie='fechado'] .pasta-fechada,
+.cortex-sala[data-dossie='fechado'] .brilhos {
+  display: inline;
+}
+
+.cortex-sala .brilho {
+  visibility: hidden;
+  animation: pixel-brilhar 1.2s steps(1) infinite;
+}
+
+/* Animações de Ambiente do Laboratório (Vapor de Café, LEDs, Nuvens, Bolhas) */
+.cortex-sala .vapor-1 {
+  animation: pixel-vapor 2.2s steps(2) infinite;
+}
+
+.cortex-sala .vapor-2 {
+  animation: pixel-vapor 2.2s steps(2) 1.1s infinite;
+}
+
+.cortex-sala .led-piscante {
+  animation: pixel-led 1.4s steps(1) infinite;
+}
+
+.cortex-sala .led-piscante-2 {
+  animation: pixel-led 0.9s steps(1) 0.4s infinite;
+}
+
+.cortex-sala .nuvem-animada {
+  animation: pixel-nuvem 14s steps(12) infinite alternate;
+}
+
+.cortex-sala .bolha-quimica {
+  animation: pixel-vapor 1.8s steps(2) infinite;
+}
+
+@keyframes pixel-respirar {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-0.6px); }
+}
+
+@keyframes pixel-quadro-a {
+  0% { visibility: visible; }
+  50% { visibility: hidden; }
+}
+
+@keyframes pixel-quadro-b {
+  0% { visibility: hidden; }
+  50% { visibility: visible; }
+}
+
+@keyframes pixel-piscar {
+  0% { visibility: hidden; }
+  94% { visibility: visible; }
+  98% { visibility: hidden; }
+}
+
+@keyframes pixel-flutuar {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-1.5px); }
+}
+
+@keyframes pixel-brilhar {
+  0% { visibility: visible; }
+  50% { visibility: hidden; }
+}
+
+@keyframes pixel-vapor {
+  0% { opacity: 0.85; transform: translateY(0); }
+  50% { opacity: 0.45; transform: translateY(-2px); }
+  100% { opacity: 0; transform: translateY(-4px); }
+}
+
+@keyframes pixel-led {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.25; }
+}
+
+@keyframes pixel-nuvem {
+  0% { transform: translateX(0); }
+  100% { transform: translateX(6px); }
+}
+
+/* Redução de Movimento (Sistema ou Botão de Acessibilidade) */
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+  .cortex-sala *,
+  .cortex-sala *::before,
+  .stage-enter {
+    animation: none !important;
+  }
+  .cortex-sala .pessoa[data-pose='andando'] .q-andar,
+  .cortex-sala .pessoa[data-pose='digitando'] .q-digitarB,
+  .cortex-sala .pessoa .piscar {
+    visibility: hidden;
+  }
+  .cortex-sala .brilho {
+    visibility: visible;
+  }
+}
+
+html[data-reduced-motion='true'] * {
+  animation-duration: 0.001ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.001ms !important;
+}
+
+html[data-reduced-motion='true'] .cortex-sala .pessoa[data-pose='andando'] .q-andar,
+html[data-reduced-motion='true'] .cortex-sala .pessoa[data-pose='digitando'] .q-digitarB,
+html[data-reduced-motion='true'] .cortex-sala .pessoa .piscar {
+  visibility: hidden !important;
 }

@@ -2,7 +2,8 @@
 
 import React from "react";
 import { KnowledgeGapItem } from "@/types";
-import { Sparkles, HelpCircle, Compass, ExternalLink } from "lucide-react";
+import { useLabStore } from "@/store/useLabStore";
+import { Sparkles, HelpCircle, Compass, ExternalLink, Key } from "lucide-react";
 
 interface KnowledgeGapsCardProps {
   gaps: KnowledgeGapItem[];
@@ -11,7 +12,36 @@ interface KnowledgeGapsCardProps {
 export const KnowledgeGapsCard: React.FC<KnowledgeGapsCardProps> = ({
   gaps,
 }) => {
-  if (!gaps || gaps.length === 0) return null;
+  const { setByokModalOpen } = useLabStore();
+
+  if (!gaps || gaps.length === 0) {
+    return (
+      <div className="rounded-2xl bg-white a11y-card border border-slate-200 p-8 shadow-sm text-center space-y-3">
+        <div className="w-11 h-11 rounded-2xl bg-purple-50 text-purple-700 border border-purple-200 flex items-center justify-center mx-auto">
+          <Sparkles size={20} />
+        </div>
+        <h3 className="text-base font-bold text-slate-900">
+          Nenhuma Lacuna Científica Gerada Nesta Sessão
+        </h3>
+        <p className="text-xs sm:text-sm text-slate-600 max-w-xl mx-auto leading-relaxed">
+          Pela política <strong>Zero-Fake</strong>, lacunas de conhecimento e hipóteses
+          experimentais só são geradas quando há ao menos <strong>2 artigos com resumo</strong>{" "}
+          incluídos e uma <strong>Chave de IA (Gemini ou Groq)</strong> ativa para extrair
+          citações literais verificadas.
+        </p>
+        <div className="pt-1">
+          <button
+            type="button"
+            onClick={() => setByokModalOpen(true)}
+            className="px-4 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer transition"
+          >
+            <Key size={13} />
+            <span>Configurar Chave Gratuita de IA</span>
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="rounded-2xl bg-white border border-slate-200 p-6 shadow-sm space-y-5">

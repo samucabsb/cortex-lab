@@ -208,3 +208,65 @@ async def export_bibtex(review_id: str):
         media_type="text/plain",
         headers={"Content-Disposition": f"attachment; filename=references_{review_id}.bib"},
     )
+
+
+async def _translate_text_gtx(client: Any, text: str, target_lang: str = "pt") -> str:
+    if not text or not text.strip():
+        return ""
+    try:
+        resp = await client.get(
+            "https://translate.googleapis.com/translate_a/single",
+            params={
+                "client": "gtx",
+                "sl": "auto",
+                "tl": target_lang,
+                "dt": "t",
+                "q": text[:4500],
+            },
+        )
+        if resp.status_code == 200:
+            data = resp.json()
+            if isinstance(data, list) and len(data) > 0 and isinstance(data[0], list):
+                translated = "".join(
+                    seg[0] for seg in data[0] if isinstance(seg, list) and len(seg) > 0 and seg[0]
+                )
+                if translated.strip():
+                    return translated.strip()
+    except Exception:
+        pass
+    return text
+
+
+@router.post("/translate", summary="Traduz títulos e resumos científicos para Português (PT-BR)")
+async def translate_scientific_texts(payload: Dict[str, Any]):
+    import asyncio
+    import httpx
+
+    items = payload.get("items") or []
+    target_lang = payload.get("target_lang") or "pt"
+    if not isinstance(items, list) or len(items) == 0:
+        return {"translations": {}}
+
+    results: Dict[str, Dict[str, str]] = {}
+    sem = asyncio.Semaphore(6)
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        async def _proc(item: Dict[str, Any]):
+            pid = str(item.get("id") or "")
+            if not pid:
+                return
+            title = str(item.get("title") or "")
+            abstract = str(item.get("abstract") or "")
+            async with sem:
+                t_title, t_abs = await asyncio.gather(
+                    _translate_text_gtx(client, title, target_lang),
+                    _translate_text_gtx(client, abstract, target_lang) if abstract else asyncio.sleep(0, result=""),
+                )
+            results[pid] = {
+                "title_pt": t_title or title,
+                "abstract_pt": t_abs or abstract,
+            }
+
+        await asyncio.gather(*[_proc(it) for it in items[:40]])
+
+    return {"translations": results}
+

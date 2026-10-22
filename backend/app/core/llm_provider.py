@@ -1,17 +1,26 @@
 import json
 import logging
 import re
-from typing import Optional, Any
+from typing import Optional, Any, List
+import httpx
 from app.core.config import settings
 
 logger = logging.getLogger("cortexlab.llm")
 
+GEMINI_CANDIDATE_MODELS: List[str] = [
+    "gemini-2.5-flash",
+    "gemini-2.0-flash",
+    "gemini-2.0-flash-lite",
+    "gemini-1.5-flash",
+]
+
 
 class MultiProviderLLMManager:
-    """Zero-Cost Resilient LLM Manager.
+    """Zero-Cost Resilient LLM Manager via Direct Async HTTPX Calls.
 
-    Automatically switches between Google Gemini Free Tier and Groq Cloud Free
-    Tier on rate limits (HTTP 429) or timeouts, supporting BYOK (Bring Your Own Key).
+    Calls Google Gemini REST API (v1beta) and Groq Cloud OpenAI-compatible API
+    directly without heavy third-party wrapper dependencies. Automatically falls
+    back across Gemini model versions and Groq on rate limits or errors.
     """
 
     def __init__(self, byok_gemini: Optional[str] = None, byok_groq: Optional[str] = None):
@@ -25,63 +34,107 @@ class MultiProviderLLMManager:
         """Returns True if at least one valid LLM API key is available."""
         return bool(self.gemini_key or self.groq_key)
 
-    def get_llm(self, preferred_provider: str = "gemini") -> Any:
-        """Instantiates the best available LLM client."""
-        if preferred_provider == "gemini" and self.gemini_key:
-            try:
-                from langchain_google_genai import ChatGoogleGenerativeAI
-                return ChatGoogleGenerativeAI(
-                    model=self.gemini_model_name,
-                    google_api_key=self.gemini_key,
-                    temperature=0.1,
-                    convert_system_message_to_human=True,
-                )
-            except Exception as e:
-                logger.warning(f"Failed to initialize Gemini, falling back to Groq: {e}")
+    async def _call_gemini_rest(self, prompt: str, system_message: str = "") -> Optional[str]:
+        if not self.gemini_key:
+            return None
 
-        if self.groq_key:
-            try:
-                from langchain_community.chat_models import ChatGroq
-                return ChatGroq(
-                    groq_api_key=self.groq_key,
-                    model_name=self.groq_model_name,
-                    temperature=0.1,
-                )
-            except Exception as e:
-                logger.error(f"Failed to initialize Groq client: {e}")
+        models_to_try = [self.gemini_model_name] + [
+            m for m in GEMINI_CANDIDATE_MODELS if m != self.gemini_model_name
+        ]
 
-        logger.info("No API keys configured for Gemini or Groq. Operating in heuristic scientific extraction mode.")
+        payload: dict[str, Any] = {
+            "contents": [{"role": "user", "parts": [{"text": prompt}]}],
+            "generationConfig": {
+                "temperature": 0.1,
+            },
+        }
+        if system_message:
+            payload["systemInstruction"] = {
+                "parts": [{"text": system_message}]
+            }
+
+        async with httpx.AsyncClient(timeout=25.0) as client:
+            for model in models_to_try:
+                url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+                try:
+                    resp = await client.post(
+                        url,
+                        params={"key": self.gemini_key},
+                        json=payload,
+                    )
+                    if resp.status_code == 200:
+                        data = resp.json()
+                        candidates = data.get("candidates") or []
+                        if candidates:
+                            parts = candidates[0].get("content", {}).get("parts") or []
+                            text = "".join(p.get("text", "") for p in parts).strip()
+                            if text:
+                                return text
+                    elif resp.status_code in (404, 400) and "API_KEY_INVALID" not in resp.text:
+                        logger.info(f"Gemini model {model} returned {resp.status_code}, trying next candidate...")
+                        continue
+                    else:
+                        logger.warning(f"Gemini API error ({resp.status_code}) on {model}: {resp.text[:200]}")
+                        break
+                except Exception as e:
+                    logger.warning(f"Gemini HTTP call exception on {model}: {e}")
+                    continue
+
+        return None
+
+    async def _call_groq_rest(self, prompt: str, system_message: str = "") -> Optional[str]:
+        if not self.groq_key:
+            return None
+
+        messages = []
+        if system_message:
+            messages.append({"role": "system", "content": system_message})
+        messages.append({"role": "user", "content": prompt})
+
+        payload = {
+            "model": self.groq_model_name,
+            "messages": messages,
+            "temperature": 0.1,
+        }
+
+        async with httpx.AsyncClient(timeout=25.0) as client:
+            try:
+                resp = await client.post(
+                    "https://api.groq.com/openai/v1/chat/completions",
+                    headers={
+                        "Authorization": f"Bearer {self.groq_key}",
+                        "Content-Type": "application/json",
+                    },
+                    json=payload,
+                )
+                if resp.status_code == 200:
+                    data = resp.json()
+                    choices = data.get("choices") or []
+                    if choices:
+                        content = choices[0].get("message", {}).get("content", "").strip()
+                        if content:
+                            return content
+                else:
+                    logger.warning(f"Groq API error ({resp.status_code}): {resp.text[:200]}")
+            except Exception as e:
+                logger.error(f"Groq HTTP call exception: {e}")
+
         return None
 
     async def invoke_with_fallback(self, prompt: str, system_message: str = "") -> str:
         """Invokes Gemini first, falls back to Groq if rate-limited or error."""
-        # 1. Attempt Gemini
+        # 1. Attempt Gemini via direct REST API
         if self.gemini_key:
-            try:
-                llm = self.get_llm(preferred_provider="gemini")
-                if llm:
-                    messages = []
-                    if system_message:
-                        messages.append(("system", system_message))
-                    messages.append(("human", prompt))
-                    response = await llm.ainvoke(messages)
-                    return str(response.content)
-            except Exception as e:
-                logger.warning(f"Gemini call failed or hit rate limit: {e}. Switching to Groq fallback...")
+            gemini_out = await self._call_gemini_rest(prompt=prompt, system_message=system_message)
+            if gemini_out:
+                return gemini_out
+            logger.warning("Gemini call failed or returned empty. Switching to Groq fallback...")
 
-        # 2. Attempt Groq
+        # 2. Attempt Groq via direct REST API
         if self.groq_key:
-            try:
-                llm = self.get_llm(preferred_provider="groq")
-                if llm:
-                    messages = []
-                    if system_message:
-                        messages.append(("system", system_message))
-                    messages.append(("human", prompt))
-                    response = await llm.ainvoke(messages)
-                    return str(response.content)
-            except Exception as e:
-                logger.error(f"Groq fallback failed as well: {e}")
+            groq_out = await self._call_groq_rest(prompt=prompt, system_message=system_message)
+            if groq_out:
+                return groq_out
 
         # 3. Deterministic Scientific Fallback Marker
         return (

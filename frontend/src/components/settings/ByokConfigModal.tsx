@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Key, Eye, EyeOff, CheckCircle2, Shield, ExternalLink, X, Cpu, Sparkles } from 'lucide-react';
 import { useLabStore } from '@/store/useLabStore';
 
@@ -10,6 +10,14 @@ export const ByokConfigModal: React.FC = () => {
   const [geminiKey, setGeminiKey] = useState(byok.geminiApiKey || '');
   const [groqKey, setGroqKey] = useState(byok.groqApiKey || '');
   const [provider, setProvider] = useState<'gemini' | 'groq' | 'backend'>(byok.preferredProvider || 'backend');
+
+  useEffect(() => {
+    if (byokModalOpen) {
+      setGeminiKey(byok.geminiApiKey || '');
+      setGroqKey(byok.groqApiKey || '');
+      setProvider(byok.preferredProvider || 'backend');
+    }
+  }, [byokModalOpen, byok.geminiApiKey, byok.groqApiKey, byok.preferredProvider]);
 
   const [showGemini, setShowGemini] = useState(false);
   const [showGroq, setShowGroq] = useState(false);
